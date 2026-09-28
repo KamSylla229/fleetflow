@@ -3,3 +3,6 @@ venv/
 db.sqlite3
 __pycache__/
 *.pyc
+
+# Notes de travail personnelles, non versionnees
+NOTES_JOUR1.md
