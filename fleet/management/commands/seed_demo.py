@@ -9,17 +9,32 @@ doublons ni violer la contrainte d'unicité sur les immatriculations.
 
 Toutes les dates sont calculées par rapport à la date du jour, afin que les
 alertes d'échéance restent pertinentes quel que soit le jour de la démonstration.
+
+Les données produites respectent les règles appliquées par fleet/services.py :
+un seul véhicule engagé sur une mission en cours à la fois, des relevés de
+compteur strictement croissants dans le temps pour chaque véhicule. Sans cela,
+la démonstration afficherait des consommations négatives et contredirait les
+refus que le service oppose à l'utilisateur.
 """
 
 import random
 from datetime import timedelta
 from decimal import Decimal
 
-from django.core.management.base import BaseCommand
+from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
-from fleet.models import Chauffeur, Entretien, Mission, PleinCarburant, Vehicule
+from fleet.models import (
+    Chauffeur,
+    Document,
+    Entretien,
+    Mission,
+    PleinCarburant,
+    Vehicule,
+)
 
 # --- Données de référence ----------------------------------------------------
 # Elles sont regroupées ici, en haut du fichier, pour qu'on puisse les relire
@@ -80,6 +95,8 @@ PRESTATAIRES = [
     "Pneus Service Cotonou",
 ]
 
+ASSUREURS = ["NSIA Assurances", "Sunu Assurances", "Africaine des Assurances"]
+
 # Prix observés à la pompe, en FCFA par litre.
 PRIX_LITRE_FCFA = [Decimal("690"), Decimal("700"), Decimal("715"), Decimal("750")]
 
@@ -91,12 +108,27 @@ COUTS_ENTRETIEN = {
     Entretien.TypeEntretien.AUTRE: (15_000, 80_000),
 }
 
+# Par type de véhicule : (consommation de référence en L/100 km, kilomètres
+# parcourus entre deux pleins). Ces deux nombres servent à calculer un volume
+# de carburant cohérent avec la distance : sans cela, la consommation affichée
+# par l'application serait fantaisiste.
+CARBURANT_REFERENCE = {
+    Vehicule.TypeVehicule.CAMION: (Decimal("32"), 800),
+    Vehicule.TypeVehicule.UTILITAIRE: (Decimal("11"), 500),
+    Vehicule.TypeVehicule.VOITURE: (Decimal("8"), 450),
+    Vehicule.TypeVehicule.MOTO: (Decimal("3"), 200),
+}
+
+# Identifiants du compte de démonstration, créés uniquement quand DEBUG=True.
+DEMO_UTILISATEUR = "demo"
+DEMO_MOT_DE_PASSE = "demo1234"
+
 
 class Command(BaseCommand):
     help = (
         "Remplit la base avec un jeu de données de démonstration béninois. "
         "ATTENTION : supprime au préalable toutes les données FleetFlow "
-        "existantes. À réserver aux environnements de développement."
+        "existantes. Refuse de tourner si DEBUG=False."
     )
 
     # @transaction.atomic : tout ce que fait la méthode est enregistré en une
@@ -105,6 +137,17 @@ class Command(BaseCommand):
     # créé.
     @transaction.atomic
     def handle(self, *args, **options):
+        # Garde-fou : cette commande détruit toutes les données FleetFlow, pas
+        # seulement celles qu'elle a créées. DEBUG=False signifie « ce n'est
+        # pas un poste de développement » : on refuse d'aller plus loin plutôt
+        # que de risquer d'effacer les données d'un client.
+        if not settings.DEBUG:
+            raise CommandError(
+                "seed_demo est réservé au développement : cette commande "
+                "supprime toutes les données FleetFlow. Elle refuse de tourner "
+                "avec DEBUG=False."
+            )
+
         # random.seed fixe la suite de nombres « aléatoires » : deux exécutions
         # produisent exactement les mêmes données. C'est plus confortable pour
         # une démonstration, et cela rend un éventuel bug reproductible.
@@ -115,12 +158,14 @@ class Command(BaseCommand):
         self._vider_donnees()
         vehicules = self._creer_vehicules()
         chauffeurs = self._creer_chauffeurs()
+        documents = self._creer_documents(vehicules)
         missions = self._creer_missions(vehicules, chauffeurs)
         pleins = self._creer_pleins(vehicules, chauffeurs)
         entretiens = self._creer_entretiens(vehicules)
+        utilisateur = self._creer_utilisateur_demo()
 
         self._afficher_resume(
-            vehicules, chauffeurs, missions, pleins, entretiens
+            vehicules, chauffeurs, documents, missions, pleins, entretiens, utilisateur
         )
 
     # --- Nettoyage -----------------------------------------------------------
@@ -129,13 +174,14 @@ class Command(BaseCommand):
         """Supprime les données existantes, enfants avant parents.
 
         L'ordre est imposé par on_delete=PROTECT : tant qu'une mission, un
-        entretien ou un plein référence un véhicule, Django refuse de supprimer
-        ce véhicule. On efface donc d'abord tout ce qui pointe vers Vehicule et
-        Chauffeur, puis seulement ensuite ces deux tables.
+        entretien, un plein ou un document référence un véhicule, Django refuse
+        de supprimer ce véhicule. On efface donc d'abord tout ce qui pointe vers
+        Vehicule et Chauffeur, puis seulement ensuite ces deux tables.
         """
         Mission.objects.all().delete()
         PleinCarburant.objects.all().delete()
         Entretien.objects.all().delete()
+        Document.objects.all().delete()
         Vehicule.objects.all().delete()
         Chauffeur.objects.all().delete()
         self.stdout.write("Données de démonstration précédentes supprimées.")
@@ -143,29 +189,22 @@ class Command(BaseCommand):
     # --- Création ------------------------------------------------------------
 
     def _creer_vehicules(self):
-        """Crée les 10 véhicules, dont trois cas d'alerte volontaires."""
+        """Crée les 10 véhicules.
+
+        Le statut n'est pas tiré au hasard : il doit rester cohérent avec les
+        missions créées plus bas, puisque services.creer_mission() refuse
+        d'affecter un véhicule déjà engagé ou en maintenance. Seul le véhicule
+        d'indice 0 portera la mission en cours ; les indices 3 et 7 sont mis en
+        maintenance pour que la démonstration ait de quoi montrer un refus.
+        """
+        statuts = {
+            0: Vehicule.Statut.EN_MISSION,
+            3: Vehicule.Statut.EN_MAINTENANCE,
+            7: Vehicule.Statut.EN_MAINTENANCE,
+        }
         vehicules = []
 
         for index, (marque, modele, type_vehicule, annee, km) in enumerate(VEHICULES):
-            # Cas de démonstration imposés, calculés depuis la date du jour :
-            #   - véhicules 0 et 1 : assurance qui expire dans moins de 15 jours
-            #   - véhicule 2       : visite technique déjà dépassée
-            if index == 0:
-                fin_assurance = self.aujourdhui + timedelta(days=6)
-            elif index == 1:
-                fin_assurance = self.aujourdhui + timedelta(days=13)
-            else:
-                fin_assurance = self.aujourdhui + timedelta(
-                    days=random.randint(45, 400)
-                )
-
-            if index == 2:
-                visite_technique = self.aujourdhui - timedelta(days=24)
-            else:
-                visite_technique = self.aujourdhui + timedelta(
-                    days=random.randint(30, 330)
-                )
-
             vehicules.append(
                 Vehicule.objects.create(
                     immatriculation=IMMATRICULATIONS[index],
@@ -174,16 +213,7 @@ class Command(BaseCommand):
                     annee=annee,
                     type_vehicule=type_vehicule,
                     kilometrage=km,
-                    statut=random.choice(
-                        [
-                            Vehicule.Statut.DISPONIBLE,
-                            Vehicule.Statut.DISPONIBLE,
-                            Vehicule.Statut.EN_MISSION,
-                            Vehicule.Statut.EN_MAINTENANCE,
-                        ]
-                    ),
-                    date_fin_assurance=fin_assurance,
-                    date_visite_technique=visite_technique,
+                    statut=statuts.get(index, Vehicule.Statut.DISPONIBLE),
                     actif=True,
                 )
             )
@@ -216,8 +246,95 @@ class Command(BaseCommand):
 
         return chauffeurs
 
+    def _creer_documents(self, vehicules):
+        """Crée les pièces administratives de chaque véhicule.
+
+        Depuis le Jour 2, les échéances ne sont plus des champs de Vehicule : ce
+        sont des lignes de la table Document. Les cas d'alerte attendus par la
+        démonstration sont donc créés ici.
+        """
+        documents = []
+
+        for index, vehicule in enumerate(vehicules):
+            # Cas imposés, calculés depuis la date du jour :
+            #   - véhicules 0 et 1 : assurance qui expire dans moins de 15 jours
+            #   - véhicule 2       : visite technique déjà dépassée
+            if index == 0:
+                fin_assurance = self.aujourdhui + timedelta(days=6)
+            elif index == 1:
+                fin_assurance = self.aujourdhui + timedelta(days=13)
+            else:
+                fin_assurance = self.aujourdhui + timedelta(
+                    days=random.randint(45, 400)
+                )
+
+            if index == 2:
+                visite_technique = self.aujourdhui - timedelta(days=24)
+            else:
+                visite_technique = self.aujourdhui + timedelta(
+                    days=random.randint(30, 330)
+                )
+
+            documents.append(
+                Document.objects.create(
+                    vehicule=vehicule,
+                    type_document=Document.TypeDocument.ASSURANCE,
+                    numero=f"POL-{2025 + index % 2}-{10_000 + index * 137}",
+                    # Une police d'assurance court sur un an : la date
+                    # d'émission se déduit de l'échéance.
+                    date_emission=fin_assurance - timedelta(days=365),
+                    date_expiration=fin_assurance,
+                    commentaire=random.choice(ASSUREURS),
+                )
+            )
+
+            documents.append(
+                Document.objects.create(
+                    vehicule=vehicule,
+                    type_document=Document.TypeDocument.VISITE_TECHNIQUE,
+                    numero=f"VT-{40_000 + index * 311}",
+                    date_emission=visite_technique - timedelta(days=365),
+                    date_expiration=visite_technique,
+                )
+            )
+
+            # La carte grise ne porte pas d'échéance : date_expiration reste
+            # NULL, et l'application l'affichera avec un badge neutre.
+            documents.append(
+                Document.objects.create(
+                    vehicule=vehicule,
+                    type_document=Document.TypeDocument.CARTE_GRISE,
+                    numero=f"CG-{vehicule.immatriculation.replace(' ', '')}",
+                    date_emission=None,
+                    date_expiration=None,
+                    commentaire="Pièce sans échéance.",
+                )
+            )
+
+            # Seuls les camions ont besoin d'une licence de transport de
+            # marchandises.
+            if vehicule.type_vehicule == Vehicule.TypeVehicule.CAMION:
+                documents.append(
+                    Document.objects.create(
+                        vehicule=vehicule,
+                        type_document=Document.TypeDocument.LICENCE_TRANSPORT,
+                        numero=f"LT-BJ-{7_000 + index * 53}",
+                        date_expiration=self.aujourdhui
+                        + timedelta(days=random.randint(60, 500)),
+                    )
+                )
+
+        return documents
+
     def _creer_missions(self, vehicules, chauffeurs):
-        """Crée 25 missions étalées de deux mois en arrière à deux semaines devant."""
+        """Crée 25 missions étalées de deux mois en arrière à deux semaines devant.
+
+        Une seule mission se retrouve au statut EN_COURS, celle dont la date de
+        départ tombe aujourd'hui. C'est volontaire : la règle d'engagement du
+        Jour 2 veut qu'un véhicule et un chauffeur ne puissent porter qu'une
+        mission en cours à la fois. Des données de démonstration qui violeraient
+        cette règle rendraient le refus du service incompréhensible.
+        """
         missions = []
 
         # On suit le compteur kilométrique de chaque véhicule au fil des
@@ -280,33 +397,48 @@ class Command(BaseCommand):
         return missions
 
     def _creer_pleins(self, vehicules, chauffeurs):
-        """Crée 15 pleins de carburant sur les deux derniers mois."""
+        """Crée deux pleins par véhicule, cohérents dans le temps.
+
+        Deux pleins et non un seul, parce que la consommation se calcule entre
+        deux passages à la pompe : avec un seul relevé, l'application ne peut
+        rien afficher. Les dates et les compteurs progressent ensemble, et le
+        volume est déduit de la distance parcourue, pour que la consommation
+        affichée ressemble à celle d'un vrai véhicule.
+
+        Le Jour 1 tirait ces compteurs au hasard autour du kilométrage courant :
+        rien ne garantissait qu'un plein plus ancien porte un relevé plus
+        faible, ce qui produisait des consommations négatives.
+        """
         pleins = []
 
-        for index in range(15):
-            vehicule = vehicules[index % len(vehicules)]
-            chauffeur = chauffeurs[index % len(chauffeurs)]
+        for index, vehicule in enumerate(vehicules):
+            consommation, ecart_km = CARBURANT_REFERENCE[vehicule.type_vehicule]
 
-            # Une moto ne prend que quelques litres, un camion fait le plein.
-            if vehicule.type_vehicule == Vehicule.TypeVehicule.MOTO:
-                litres = Decimal(random.randint(4, 9))
-            elif vehicule.type_vehicule == Vehicule.TypeVehicule.CAMION:
-                litres = Decimal(random.randint(120, 300))
-            else:
-                litres = Decimal(random.randint(35, 60))
+            # Le plein le plus récent est relevé un peu avant le kilométrage
+            # actuel ; le précédent, un « plein » plus tôt.
+            km_recent = vehicule.kilometrage - 150
+            km_precedent = km_recent - ecart_km
 
-            pleins.append(
-                PleinCarburant.objects.create(
-                    vehicule=vehicule,
-                    chauffeur=chauffeur,
-                    date=self.aujourdhui - timedelta(days=index * 4),
-                    litres=litres,
-                    prix_litre=random.choice(PRIX_LITRE_FCFA),
-                    # Relevé pris un peu avant le kilométrage actuel, puisque le
-                    # plein a eu lieu dans le passé.
-                    km_compteur=vehicule.kilometrage - random.randint(50, 3000),
+            for rang, (km_compteur, jours) in enumerate(
+                [(km_precedent, 45), (km_recent, 12)]
+            ):
+                # Une variation de quelques pour cent autour de la consommation
+                # de référence : conduite, charge et état de la route.
+                variation = Decimal(random.choice(["0.92", "1.00", "1.09"]))
+                litres = (
+                    consommation * Decimal(ecart_km) / Decimal(100) * variation
+                ).quantize(Decimal("0.01"))
+
+                pleins.append(
+                    PleinCarburant.objects.create(
+                        vehicule=vehicule,
+                        chauffeur=chauffeurs[(index + rang) % len(chauffeurs)],
+                        date=self.aujourdhui - timedelta(days=jours),
+                        litres=litres,
+                        prix_litre=random.choice(PRIX_LITRE_FCFA),
+                        km_compteur=km_compteur,
+                    )
                 )
-            )
 
         return pleins
 
@@ -342,16 +474,53 @@ class Command(BaseCommand):
 
         return entretiens
 
+    def _creer_utilisateur_demo(self):
+        """Crée (ou réinitialise) le compte de démonstration.
+
+        Sans compte, impossible de se connecter : toutes les vues de FleetFlow
+        exigent une authentification. Le mot de passe est en clair dans le
+        code, ce qui est acceptable pour un compte de démonstration créé
+        uniquement quand DEBUG=True — et c'est pour cela que le garde-fou de
+        handle() est indispensable.
+        """
+        Utilisateur = get_user_model()
+
+        utilisateur, cree = Utilisateur.objects.get_or_create(
+            username=DEMO_UTILISATEUR,
+            defaults={
+                "email": "demo@fleetflow.test",
+                "first_name": "Compte",
+                "last_name": "Démonstration",
+                # is_staff donne aussi accès à /admin/, pratique pour comparer
+                # l'interface de FleetFlow et celle de l'admin Django.
+                "is_staff": True,
+                "is_superuser": True,
+            },
+        )
+        # set_password hache le mot de passe : on n'écrit jamais un mot de passe
+        # en clair dans la colonne password.
+        utilisateur.set_password(DEMO_MOT_DE_PASSE)
+        utilisateur.save()
+
+        self.stdout.write(
+            "Compte de démonstration "
+            + ("créé" if cree else "mot de passe réinitialisé")
+            + f" : {DEMO_UTILISATEUR} / {DEMO_MOT_DE_PASSE}"
+        )
+        return utilisateur
+
     # --- Compte rendu --------------------------------------------------------
 
-    def _afficher_resume(self, vehicules, chauffeurs, missions, pleins, entretiens):
+    def _afficher_resume(
+        self, vehicules, chauffeurs, documents, missions, pleins, entretiens, utilisateur
+    ):
         """Affiche ce qui a été créé, puis les alertes attendues pour la démo."""
         self.stdout.write("")
         self.stdout.write(
             self.style.SUCCESS(
                 f"{len(vehicules)} véhicules, {len(chauffeurs)} chauffeurs, "
-                f"{len(missions)} missions, {len(pleins)} pleins et "
-                f"{len(entretiens)} entretiens créés."
+                f"{len(documents)} documents, {len(missions)} missions, "
+                f"{len(pleins)} pleins et {len(entretiens)} entretiens créés."
             )
         )
 
@@ -361,23 +530,42 @@ class Command(BaseCommand):
 
         for vehicule in vehicules:
             jours = vehicule.jours_avant_fin_assurance
-            if jours < 15:
+            if jours is not None and jours < 15:
                 self.stdout.write(
                     f"  - {vehicule.immatriculation} : assurance à échéance "
                     f"dans {jours} jours ({vehicule.date_fin_assurance:%d/%m/%Y})"
                 )
-            if vehicule.date_visite_technique < self.aujourdhui:
-                retard = (self.aujourdhui - vehicule.date_visite_technique).days
+            visite = vehicule.date_visite_technique
+            if visite is not None and visite < self.aujourdhui:
+                retard = (self.aujourdhui - visite).days
                 self.stdout.write(
                     f"  - {vehicule.immatriculation} : visite technique expirée "
-                    f"depuis {retard} jours "
-                    f"({vehicule.date_visite_technique:%d/%m/%Y})"
+                    f"depuis {retard} jours ({visite:%d/%m/%Y})"
                 )
 
         for chauffeur in chauffeurs:
-            jours = (chauffeur.date_expiration_permis - self.aujourdhui).days
+            jours = chauffeur.jours_avant_expiration_permis
             if jours < 30:
                 self.stdout.write(
                     f"  - {chauffeur.nom} : permis à renouveler dans {jours} "
                     f"jours ({chauffeur.date_expiration_permis:%d/%m/%Y})"
                 )
+
+        mission_en_cours = next(
+            (m for m in missions if m.statut == Mission.Statut.EN_COURS), None
+        )
+        if mission_en_cours is not None:
+            self.stdout.write(
+                f"  - {mission_en_cours.vehicule.immatriculation} est engagé sur "
+                # Fleche ASCII et non le caractere U+2192 : la console
+                # Windows ecrit en cp1252, qui ne sait pas le representer, et
+                # le plantage annulerait toute la transaction du seed.
+                f"la mission {mission_en_cours.depart} -> "
+                f"{mission_en_cours.destination} : toute nouvelle affectation "
+                "de ce véhicule sera refusée."
+            )
+
+        self.stdout.write("")
+        self.stdout.write(
+            f"Connexion : {DEMO_UTILISATEUR} / {DEMO_MOT_DE_PASSE}"
+        )

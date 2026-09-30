@@ -3,6 +3,10 @@
 Les modèles sont rangés du plus indépendant au plus dépendant : Vehicule et
 Chauffeur d'abord, puis Mission, Entretien et PleinCarburant qui pointent
 vers eux.
+
+Les échéances administratives (assurance, visite technique, carte grise…)
+ne sont pas des champs de Vehicule : elles vivent dans le modèle Document,
+en bas de ce fichier.
 """
 
 from django.db import models
@@ -53,8 +57,11 @@ class Vehicule(models.Model):
         default=Statut.DISPONIBLE,
         verbose_name="Statut",
     )
-    date_fin_assurance = models.DateField(verbose_name="Fin de l'assurance")
-    date_visite_technique = models.DateField(verbose_name="Prochaine visite technique")
+    # Les échéances (assurance, visite technique, carte grise…) ne sont plus
+    # des champs de ce modèle : elles sont portées par Document, en bas de ce
+    # fichier. Voir les propriétés date_fin_assurance et date_visite_technique
+    # plus bas, qui les relisent depuis le document en vigueur.
+
     # "actif" permet de sortir un véhicule de la flotte sans le supprimer :
     # on conserve ainsi tout son historique de missions et d'entretiens.
     actif = models.BooleanField(default=True, verbose_name="Actif")
@@ -72,23 +79,78 @@ class Vehicule(models.Model):
     # lecture. C'est exactement ce qu'on veut ici, car la réponse dépend de la
     # date du jour et changerait donc toute seule d'un jour à l'autre.
 
+    def _dernier_document(self, type_document):
+        """Le document en vigueur pour un type donné, ou None s'il n'y en a pas.
+
+        Le tri est fait en Python sur self.documents.all(), et non avec un
+        .filter() SQL. C'est volontaire : quand la vue a préchargé les documents
+        avec prefetch_related("documents"), parcourir une liste déjà en mémoire
+        ne coûte aucune requête. Un .filter() en déclencherait une nouvelle à
+        chaque appel — donc vingt-cinq de plus sur une liste de vingt-cinq
+        véhicules. C'est précisément le problème « N+1 » qu'on cherche à éviter.
+        """
+        candidats = [
+            document
+            for document in self.documents.all()
+            if document.type_document == type_document
+            and document.date_expiration is not None
+        ]
+        if not candidats:
+            return None
+        # Le document qui fait foi est celui dont l'échéance est la plus
+        # lointaine : c'est le dernier renouvellement enregistré.
+        return max(candidats, key=lambda document: document.date_expiration)
+
+    @property
+    def document_assurance(self):
+        """L'attestation d'assurance en vigueur, ou None si aucune n'est saisie."""
+        return self._dernier_document(Document.TypeDocument.ASSURANCE)
+
+    @property
+    def date_fin_assurance(self):
+        """Fin de l'assurance en vigueur, ou None si aucune n'est enregistrée."""
+        document = self.document_assurance
+        return document.date_expiration if document else None
+
     @property
     def jours_avant_fin_assurance(self):
         """Nombre de jours restants avant la fin de l'assurance.
 
-        La valeur est négative si l'assurance est déjà expirée
-        (par exemple -3 pour une assurance expirée depuis trois jours).
+        La valeur est négative si l'assurance est déjà expirée (par exemple -3
+        pour une assurance expirée depuis trois jours), et None si aucune
+        attestation n'est enregistrée pour ce véhicule.
         """
+        date_fin = self.date_fin_assurance
+        if date_fin is None:
+            return None
         # localdate() renvoie la date du jour dans le fuseau du projet
         # (Africa/Porto-Novo) et non en UTC : indispensable pour ne pas se
         # tromper d'un jour sur une échéance.
-        ecart = self.date_fin_assurance - timezone.localdate()
-        return ecart.days
+        return (date_fin - timezone.localdate()).days
 
     @property
     def assurance_expiree(self):
-        """True si la date de fin d'assurance est déjà passée."""
-        return self.jours_avant_fin_assurance < 0
+        """True si l'assurance est expirée, False sinon, None si on l'ignore.
+
+        Trois états et non deux : « aucune attestation enregistrée » n'est pas
+        « assurance valide ». Renvoyer False dans ce cas afficherait comme
+        rassurant un véhicule dont le dossier est en réalité vide.
+        """
+        jours = self.jours_avant_fin_assurance
+        if jours is None:
+            return None
+        return jours < 0
+
+    @property
+    def document_visite_technique(self):
+        """Le dernier procès-verbal de visite technique, ou None."""
+        return self._dernier_document(Document.TypeDocument.VISITE_TECHNIQUE)
+
+    @property
+    def date_visite_technique(self):
+        """Échéance de la visite technique, ou None si elle n'est pas saisie."""
+        document = self.document_visite_technique
+        return document.date_expiration if document else None
 
 
 class Chauffeur(models.Model):
@@ -111,6 +173,23 @@ class Chauffeur(models.Model):
 
     def __str__(self):
         return self.nom
+
+    # --- Propriétés calculées ------------------------------------------------
+
+    @property
+    def jours_avant_expiration_permis(self):
+        """Jours restants avant l'expiration du permis (négatif si dépassée)."""
+        return (self.date_expiration_permis - timezone.localdate()).days
+
+    @property
+    def permis_expire(self):
+        """True si le permis n'est plus valide aujourd'hui.
+
+        Deux états seulement ici, contrairement à assurance_expiree :
+        date_expiration_permis est un champ obligatoire, la réponse est donc
+        toujours connue. L'assurance, elle, dépend d'un document facultatif.
+        """
+        return self.jours_avant_expiration_permis < 0
 
 
 class Mission(models.Model):
@@ -172,6 +251,38 @@ class Mission(models.Model):
         ordering = ["-date_depart"]
         verbose_name = "Mission"
         verbose_name_plural = "Missions"
+        # Ces contraintes sont posées dans la base de données elle-même, pas
+        # seulement en Python. Les fonctions de services.py valident déjà les
+        # mêmes règles et renvoient des messages clairs à l'utilisateur ; la
+        # contrainte est le filet de sécurité de dernier recours, qui protège
+        # aussi les écritures faites depuis l'admin, un script ou le shell.
+        constraints = [
+            models.CheckConstraint(
+                # Q(...) | Q(...) : soit la mission n'est pas clôturée (le
+                # kilométrage d'arrivée vaut NULL), soit il dépasse strictement
+                # celui du départ. Autoriser NULL explicitement est
+                # indispensable : sans cela, toute mission en cours serait
+                # refusée par la base.
+                condition=models.Q(km_arrivee__isnull=True)
+                | models.Q(km_arrivee__gt=models.F("km_depart")),
+                name="mission_km_arrivee_superieur_km_depart",
+                violation_error_message=(
+                    "Le kilométrage d'arrivée doit être strictement supérieur "
+                    "au kilométrage de départ."
+                ),
+            ),
+            models.CheckConstraint(
+                # F("date_depart") désigne la valeur de l'autre colonne de la
+                # même ligne : la comparaison est faite par la base, sans
+                # relire l'objet en Python.
+                condition=models.Q(date_arrivee__isnull=True)
+                | models.Q(date_arrivee__gte=models.F("date_depart")),
+                name="mission_date_arrivee_apres_date_depart",
+                violation_error_message=(
+                    "La date d'arrivée ne peut pas précéder la date de départ."
+                ),
+            ),
+        ]
 
     def __str__(self):
         return f"{self.depart} → {self.destination} ({self.date_depart})"
@@ -280,6 +391,100 @@ class PleinCarburant(models.Model):
         ordering = ["-date"]
         verbose_name = "Plein de carburant"
         verbose_name_plural = "Pleins de carburant"
+        constraints = [
+            models.CheckConstraint(
+                # Un plein de zéro litre n'existe pas : c'est une saisie
+                # erronée, et il provoquerait une division par zéro dans le
+                # calcul de consommation.
+                condition=models.Q(litres__gt=0),
+                name="plein_litres_strictement_positifs",
+                violation_error_message=(
+                    "Le nombre de litres doit être strictement positif."
+                ),
+            ),
+        ]
 
     def __str__(self):
         return f"{self.vehicule.immatriculation} — {self.litres} L ({self.date})"
+
+
+class Document(models.Model):
+    """Une pièce administrative rattachée à un véhicule, avec son échéance.
+
+    Ce modèle est la seule source de vérité pour les échéances d'un véhicule.
+    Vehicule ne porte plus de champ date_fin_assurance ni date_visite_technique :
+    dès qu'il a fallu gérer aussi une carte grise ou une licence de transport, la
+    même information se serait retrouvée à deux endroits — et deux sources de
+    vérité finissent toujours par diverger. Ici, un véhicule porte autant de
+    documents que nécessaire, et l'historique des renouvellements est conservé.
+    """
+
+    class TypeDocument(models.TextChoices):
+        ASSURANCE = "assurance", "Assurance"
+        VISITE_TECHNIQUE = "visite_technique", "Visite technique"
+        CARTE_GRISE = "carte_grise", "Carte grise"
+        LICENCE_TRANSPORT = "licence_transport", "Licence de transport"
+        AUTRE = "autre", "Autre"
+
+    vehicule = models.ForeignKey(
+        Vehicule,
+        on_delete=models.PROTECT,
+        related_name="documents",
+        verbose_name="Véhicule",
+    )
+    type_document = models.CharField(
+        max_length=30,
+        choices=TypeDocument.choices,
+        verbose_name="Type de document",
+    )
+    numero = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name="Numéro de la pièce",
+    )
+    date_emission = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name="Date d'émission",
+    )
+    # Facultatif, car toutes les pièces n'expirent pas : une carte grise reste
+    # valable tant que le véhicule ne change pas de propriétaire. Un document
+    # sans échéance reçoit un badge neutre, jamais vert ni rouge.
+    date_expiration = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name="Date d'expiration",
+        help_text="À laisser vide pour une pièce sans échéance, comme la carte grise",
+    )
+    commentaire = models.TextField(blank=True, verbose_name="Commentaire")
+
+    class Meta:
+        # Échéances les plus lointaines d'abord : pour un type donné, le
+        # document en vigueur est le premier de la liste.
+        ordering = ["-date_expiration"]
+        verbose_name = "Document"
+        verbose_name_plural = "Documents"
+
+    def __str__(self):
+        if self.date_expiration is None:
+            return (
+                f"{self.get_type_document_display()} — "
+                f"{self.vehicule.immatriculation}"
+            )
+        return (
+            f"{self.get_type_document_display()} — "
+            f"{self.vehicule.immatriculation} "
+            f"(expire le {self.date_expiration:%d/%m/%Y})"
+        )
+
+    @property
+    def jours_avant_expiration(self):
+        """Jours restants avant l'expiration, ou None si la pièce n'expire pas.
+
+        La qualification en valide / bientôt expiré / expiré n'est pas ici mais
+        dans services.statut_echeance() : la même règle sert aussi au permis des
+        chauffeurs, elle n'a donc pas à être dupliquée dans deux modèles.
+        """
+        if self.date_expiration is None:
+            return None
+        return (self.date_expiration - timezone.localdate()).days
