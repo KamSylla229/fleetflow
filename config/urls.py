@@ -16,4 +16,8 @@ urlpatterns = [
     # l'instant. Reecrire une vue de connexion a la main serait du code en
     # plus a maintenir, et une occasion de se tromper sur la securite.
     path("", include("django.contrib.auth.urls")),
+    # Les routes metier viennent en dernier : Django essaie les motifs dans
+    # l'ordre, et celles de l'authentification (login/, logout/) sont plus
+    # specifiques que la racine de fleet.urls.
+    path("", include("fleet.urls")),
 ]

@@ -1,0 +1,56 @@
+{% comment %}
+Pagination réutilisable par toutes les listes.
+
+Attend dans le contexte :
+  - page_obj           : fourni par ListView quand paginate_by est défini ;
+  - parametres_filtres : la chaîne de requête courante sans « page »,
+                         préparée par ListeFiltrableView.
+
+C'est ce second élément qui fait tout l'intérêt du fichier : sans lui, chaque
+lien de pagination repartirait sans les filtres, et passer à la page 2 d'une
+recherche afficherait la page 2 de la liste complète.
+{% endcomment %}
+{% if page_obj.paginator.num_pages > 1 %}
+  <nav aria-label="Pagination" class="mt-3">
+    <ul class="pagination pagination-sm mb-1">
+
+      <li class="page-item{% if not page_obj.has_previous %} disabled{% endif %}">
+        <a class="page-link"
+           href="?page={{ page_obj.previous_page_number }}{% if parametres_filtres %}&amp;{{ parametres_filtres }}{% endif %}">
+          Précédent
+        </a>
+      </li>
+
+      {% for numero in page_obj.paginator.page_range %}
+        {% comment %}
+          On n'affiche que les pages proches de la page courante : une flotte
+          de mille véhicules produirait sinon quarante liens illisibles.
+        {% endcomment %}
+        {% if numero == page_obj.number %}
+          <li class="page-item active">
+            <span class="page-link">{{ numero }}</span>
+          </li>
+        {% elif numero > page_obj.number|add:"-3" and numero < page_obj.number|add:"3" %}
+          <li class="page-item">
+            <a class="page-link"
+               href="?page={{ numero }}{% if parametres_filtres %}&amp;{{ parametres_filtres }}{% endif %}">
+              {{ numero }}
+            </a>
+          </li>
+        {% endif %}
+      {% endfor %}
+
+      <li class="page-item{% if not page_obj.has_next %} disabled{% endif %}">
+        <a class="page-link"
+           href="?page={{ page_obj.next_page_number }}{% if parametres_filtres %}&amp;{{ parametres_filtres }}{% endif %}">
+          Suivant
+        </a>
+      </li>
+
+    </ul>
+    <p class="small text-body-secondary mb-0">
+      Page {{ page_obj.number }} sur {{ page_obj.paginator.num_pages }} —
+      {{ page_obj.paginator.count }} résultat{{ page_obj.paginator.count|pluralize }}.
+    </p>
+  </nav>
+{% endif %}

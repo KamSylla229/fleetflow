@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block titre %}{{ titre }} — FleetFlow{% endblock %}
+
+{% block entete %}
+<h1 class="h3 mb-3">{{ titre }}</h1>
+{% endblock %}
+
+{% block contenu %}
+<div class="row">
+  <div class="col-lg-7">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <form method="post">
+          {% csrf_token %}
+          {% include "partials/_champs_formulaire.html" %}
+
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-dark">Enregistrer</button>
+            {% if object %}
+              <a class="btn btn-outline-secondary" href="{{ object.get_absolute_url }}">
+                Annuler
+              </a>
+            {% else %}
+              <a class="btn btn-outline-secondary"
+                 href="{% url 'fleet:chauffeur_liste' %}">Annuler</a>
+            {% endif %}
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

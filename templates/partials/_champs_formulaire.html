@@ -1,0 +1,38 @@
+{% comment %}
+Affiche les champs d'un formulaire, un par ligne.
+
+Django sait rendre un formulaire entier d'un coup ({{ form }}), mais le
+balisage produit ne porte pas les classes de Bootstrap. On boucle donc sur les
+champs pour les envelopper nous-mêmes. Les classes des widgets, elles, sont
+posées côté Python par MiseEnFormeBootstrapMixin : le gabarit ne s'occupe que
+de la structure, pas de l'apparence de chaque contrôle.
+{% endcomment %}
+
+{% if form.non_field_errors %}
+  <div class="alert alert-danger" role="alert">
+    {% for erreur in form.non_field_errors %}
+      <div>{{ erreur }}</div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+{% for champ in form %}
+  <div class="mb-3">
+    <label for="{{ champ.id_for_label }}" class="form-label">
+      {{ champ.label }}
+      {% if champ.field.required %}
+        <span class="text-danger" title="Champ obligatoire">*</span>
+      {% endif %}
+    </label>
+
+    {{ champ }}
+
+    {% if champ.help_text %}
+      <div class="form-text">{{ champ.help_text }}</div>
+    {% endif %}
+
+    {% for erreur in champ.errors %}
+      <div class="text-danger small mt-1">{{ erreur }}</div>
+    {% endfor %}
+  </div>
+{% endfor %}

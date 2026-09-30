@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block titre %}Véhicules — FleetFlow{% endblock %}
+
+{% block entete %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Véhicules</h1>
+  <a class="btn btn-dark" href="{% url 'fleet:vehicule_creer' %}">
+    Nouveau véhicule
+  </a>
+</div>
+{% endblock %}
+
+{% block contenu %}
+
+{% comment %}
+  Le formulaire de filtres est en GET et non en POST : les critères se
+  retrouvent dans l'adresse, donc la page filtrée peut être mise en favori,
+  partagée à un collègue, et le bouton « précédent » du navigateur fonctionne.
+{% endcomment %}
+<form method="get" class="card card-body shadow-sm mb-3">
+  <div class="row g-2 align-items-end">
+
+    <div class="col-md-4">
+      <label for="recherche" class="form-label small mb-1">Recherche</label>
+      <input type="search" id="recherche" name="q" value="{{ recherche }}"
+             class="form-control" placeholder="Plaque, marque ou modèle">
+    </div>
+
+    <div class="col-md-3">
+      <label for="statut" class="form-label small mb-1">Statut</label>
+      <select id="statut" name="statut" class="form-select">
+        <option value="">Tous les statuts</option>
+        {% for valeur, libelle in statuts %}
+          <option value="{{ valeur }}"
+                  {% if valeur == statut_choisi %}selected{% endif %}>
+            {{ libelle }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="col-md-3">
+      <label for="actif" class="form-label small mb-1">Flotte</label>
+      <select id="actif" name="actif" class="form-select">
+        <option value="1" {% if actif_choisi == "1" %}selected{% endif %}>
+          Flotte active
+        </option>
+        <option value="0" {% if actif_choisi == "0" %}selected{% endif %}>
+          Véhicules sortis
+        </option>
+        <option value="tous" {% if actif_choisi == "tous" %}selected{% endif %}>
+          Tous
+        </option>
+      </select>
+    </div>
+
+    <div class="col-md-2 d-flex gap-2">
+      <button type="submit" class="btn btn-secondary w-100">Filtrer</button>
+      <a href="{% url 'fleet:vehicule_liste' %}" class="btn btn-outline-secondary"
+         title="Réinitialiser les filtres">×</a>
+    </div>
+
+  </div>
+</form>
+
+<div class="card shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Immatriculation</th>
+          <th>Véhicule</th>
+          <th>Type</th>
+          <th>Statut</th>
+          <th class="text-end">Kilométrage</th>
+          <th>Assurance</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for vehicule in vehicules %}
+          <tr{% if not vehicule.actif %} class="table-secondary"{% endif %}>
+            <td>
+              <a href="{{ vehicule.get_absolute_url }}" class="fw-semibold">
+                {{ vehicule.immatriculation }}
+              </a>
+              {% if not vehicule.actif %}
+                <span class="badge bg-secondary ms-1">Sorti</span>
+              {% endif %}
+            </td>
+            <td>{{ vehicule.marque }} {{ vehicule.modele }}
+              <span class="text-body-secondary small">({{ vehicule.annee }})</span>
+            </td>
+            <td>{{ vehicule.get_type_vehicule_display }}</td>
+            <td>{{ vehicule.get_statut_display }}</td>
+            {% comment %}
+              intcomma n'est pas utilisé : django.contrib.humanize n'est pas
+              installé, et l'ajouter pour un séparateur de milliers ne se
+              justifie pas encore.
+            {% endcomment %}
+            <td class="text-end">{{ vehicule.kilometrage }} km</td>
+            <td>
+              {# statut_assurance est préparé par la vue, pas calculé ici. #}
+              <span class="badge {{ vehicule.statut_assurance.classe_css }}">
+                {{ vehicule.statut_assurance.libelle }}
+              </span>
+            </td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-dark"
+                 href="{{ vehicule.get_absolute_url }}">Fiche</a>
+            </td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="7" class="text-center text-body-secondary py-4">
+              Aucun véhicule ne correspond à ces critères.
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% include "partials/_pagination.html" %}
+
+{% endblock %}

@@ -580,3 +580,89 @@ class StatutProchainEntretienTest(TestCase):
         statut = services.statut_prochain_entretien(self.entretien, 100_000)
         self.assertEqual(statut.code, services.ECHEANCE_SANS)
         self.assertIsNone(statut.km_restants)
+
+
+class StatutAssuranceTest(TestCase):
+    """statut_assurance distingue « absente » de « sans échéance »."""
+
+    def setUp(self):
+        self.vehicule = creer_vehicule()
+
+    def test_sans_attestation(self):
+        statut = services.statut_assurance(self.vehicule)
+        self.assertEqual(statut.code, services.ECHEANCE_ABSENTE)
+        # Une absence d'attestation est une alerte, pas un état neutre.
+        self.assertTrue(statut.est_alerte)
+
+    def test_avec_attestation_valide(self):
+        creer_document(self.vehicule, Document.TypeDocument.ASSURANCE, jours=200)
+        statut = services.statut_assurance(self.vehicule)
+        self.assertEqual(statut.code, services.ECHEANCE_VALIDE)
+
+    def test_visite_technique_absente(self):
+        statut = services.statut_visite_technique(self.vehicule)
+        self.assertEqual(statut.code, services.ECHEANCE_ABSENTE)
+        self.assertEqual(statut.libelle, "Aucun procès-verbal")
+
+
+class ActivationTest(TestCase):
+    """Sortie et retour dans la flotte : le « soft delete » de FleetFlow."""
+
+    def setUp(self):
+        self.aujourdhui = timezone.localdate()
+        self.vehicule = creer_vehicule()
+        self.chauffeur = creer_chauffeur()
+
+    def test_sortie_de_flotte(self):
+        vehicule = services.basculer_activation_vehicule(self.vehicule)
+        self.assertFalse(vehicule.actif)
+        # Un véhicule sorti ne doit pas rester « disponible ».
+        self.assertEqual(vehicule.statut, Vehicule.Statut.HORS_SERVICE)
+
+    def test_reintegration(self):
+        services.basculer_activation_vehicule(self.vehicule)
+        vehicule = services.basculer_activation_vehicule(self.vehicule)
+        self.assertTrue(vehicule.actif)
+        self.assertEqual(vehicule.statut, Vehicule.Statut.DISPONIBLE)
+
+    def test_refus_de_sortir_un_vehicule_en_mission(self):
+        services.creer_mission(
+            vehicule=self.vehicule,
+            chauffeur=self.chauffeur,
+            depart="Cotonou",
+            destination="Parakou",
+            date_depart=self.aujourdhui,
+        )
+        with self.assertRaises(ValidationError) as contexte:
+            services.basculer_activation_vehicule(self.vehicule)
+
+        self.assertIn("en mission", " ".join(contexte.exception.messages))
+        self.vehicule.refresh_from_db()
+        self.assertTrue(self.vehicule.actif)
+
+    def test_desactivation_du_chauffeur(self):
+        chauffeur = services.basculer_activation_chauffeur(self.chauffeur)
+        self.assertFalse(chauffeur.actif)
+
+    def test_refus_de_desactiver_un_chauffeur_en_mission(self):
+        services.creer_mission(
+            vehicule=self.vehicule,
+            chauffeur=self.chauffeur,
+            depart="Cotonou",
+            destination="Lomé",
+            date_depart=self.aujourdhui,
+        )
+        with self.assertRaises(ValidationError):
+            services.basculer_activation_chauffeur(self.chauffeur)
+
+    def test_un_vehicule_sorti_ne_recoit_plus_de_mission(self):
+        """Le lien entre la désactivation et le refus d'affectation."""
+        services.basculer_activation_vehicule(self.vehicule)
+        with self.assertRaises(ValidationError):
+            services.creer_mission(
+                vehicule=self.vehicule,
+                chauffeur=self.chauffeur,
+                depart="Cotonou",
+                destination="Parakou",
+                date_depart=self.aujourdhui,
+            )

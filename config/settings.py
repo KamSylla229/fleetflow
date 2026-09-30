@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from pathlib import Path
 
 import environ
+from django.contrib.messages import constants as messages_constants
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -104,6 +105,15 @@ AUTH_PASSWORD_VALIDATORS = [
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
     },
 ]
+
+
+# Messages
+# https://docs.djangoproject.com/en/5.2/ref/contrib/messages/
+
+# Django etiquette ses messages d'erreur "error" ; Bootstrap attend la classe
+# "alert-danger". Renommer la categorie ici evite d'ecrire un if dans chaque
+# gabarit qui affiche des messages.
+MESSAGE_TAGS = {messages_constants.ERROR: "danger"}
 
 
 # Authentification

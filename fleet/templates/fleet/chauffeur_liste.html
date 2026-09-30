@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block titre %}Chauffeurs — FleetFlow{% endblock %}
+
+{% block entete %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Chauffeurs</h1>
+  <a class="btn btn-dark" href="{% url 'fleet:chauffeur_creer' %}">
+    Nouveau chauffeur
+  </a>
+</div>
+{% endblock %}
+
+{% block contenu %}
+
+<form method="get" class="card card-body shadow-sm mb-3">
+  <div class="row g-2 align-items-end">
+
+    <div class="col-md-4">
+      <label for="recherche" class="form-label small mb-1">Recherche</label>
+      <input type="search" id="recherche" name="q" value="{{ recherche }}"
+             class="form-control" placeholder="Nom, téléphone ou permis">
+    </div>
+
+    <div class="col-md-3">
+      <label for="permis" class="form-label small mb-1">Permis</label>
+      <select id="permis" name="permis" class="form-select">
+        <option value="">Tous</option>
+        {% comment %}
+          Les valeurs sont celles des constantes de services.py. Les écrire en
+          clair ici est le point faible de ce filtre : une divergence ne
+          provoquerait aucune erreur, seulement un filtre sans effet.
+        {% endcomment %}
+        <option value="expiree" {% if permis_choisi == "expiree" %}selected{% endif %}>
+          Expiré
+        </option>
+        <option value="bientot" {% if permis_choisi == "bientot" %}selected{% endif %}>
+          Expire sous 30 jours
+        </option>
+        <option value="valide" {% if permis_choisi == "valide" %}selected{% endif %}>
+          Valide
+        </option>
+      </select>
+    </div>
+
+    <div class="col-md-3">
+      <label for="actif" class="form-label small mb-1">Effectif</label>
+      <select id="actif" name="actif" class="form-select">
+        <option value="1" {% if actif_choisi == "1" %}selected{% endif %}>Actifs</option>
+        <option value="0" {% if actif_choisi == "0" %}selected{% endif %}>Désactivés</option>
+        <option value="tous" {% if actif_choisi == "tous" %}selected{% endif %}>Tous</option>
+      </select>
+    </div>
+
+    <div class="col-md-2 d-flex gap-2">
+      <button type="submit" class="btn btn-secondary w-100">Filtrer</button>
+      <a href="{% url 'fleet:chauffeur_liste' %}" class="btn btn-outline-secondary"
+         title="Réinitialiser les filtres">×</a>
+    </div>
+
+  </div>
+</form>
+
+<div class="card shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Nom</th>
+          <th>Téléphone</th>
+          <th>Numéro de permis</th>
+          <th>Permis</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for chauffeur in chauffeurs %}
+          <tr{% if not chauffeur.actif %} class="table-secondary"{% endif %}>
+            <td>
+              <a href="{{ chauffeur.get_absolute_url }}" class="fw-semibold">
+                {{ chauffeur.nom }}
+              </a>
+              {% if not chauffeur.actif %}
+                <span class="badge bg-secondary ms-1">Désactivé</span>
+              {% endif %}
+            </td>
+            <td>{{ chauffeur.telephone }}</td>
+            <td>{{ chauffeur.numero_permis }}</td>
+            <td>
+              <span class="badge {{ chauffeur.statut_permis.classe_css }}">
+                {{ chauffeur.statut_permis.libelle }}
+              </span>
+            </td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-dark"
+                 href="{{ chauffeur.get_absolute_url }}">Fiche</a>
+            </td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="5" class="text-center text-body-secondary py-4">
+              Aucun chauffeur ne correspond à ces critères.
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% include "partials/_pagination.html" %}
+
+{% endblock %}

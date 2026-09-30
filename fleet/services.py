@@ -72,6 +72,11 @@ ECHEANCE_VALIDE = "valide"
 ECHEANCE_BIENTOT = "bientot"
 ECHEANCE_EXPIREE = "expiree"
 ECHEANCE_SANS = "sans_echeance"
+# « Aucune pièce enregistrée » n'est ni « valide » ni « sans échéance » :
+# un véhicule dont le dossier d'assurance est vide doit alerter, pas
+# rassurer. C'est le pendant, côté affichage, du None renvoyé par
+# Vehicule.assurance_expiree.
+ECHEANCE_ABSENTE = "absente"
 
 
 @dataclass(frozen=True)
@@ -93,7 +98,7 @@ class StatutEcheance:
     @property
     def est_alerte(self):
         """True si l'échéance mérite l'attention du gestionnaire."""
-        return self.code in (ECHEANCE_BIENTOT, ECHEANCE_EXPIREE)
+        return self.code in (ECHEANCE_BIENTOT, ECHEANCE_EXPIREE, ECHEANCE_ABSENTE)
 
 
 @dataclass(frozen=True)
@@ -174,6 +179,36 @@ def documents_avec_statut(vehicule):
     for document in documents:
         document.statut = statut_echeance(document.date_expiration)
     return documents
+
+
+def statut_assurance(vehicule):
+    """Statut de l'assurance d'un véhicule, absence d'attestation comprise.
+
+    statut_echeance(None) répond « sans échéance », ce qui convient à une carte
+    grise mais pas à une assurance : une police d'assurance a toujours une fin,
+    et ne pas en trouver signifie que le dossier est incomplet. On distingue
+    donc les deux cas au lieu d'afficher un badge neutre rassurant.
+    """
+    if vehicule.document_assurance is None:
+        return StatutEcheance(
+            code=ECHEANCE_ABSENTE,
+            libelle="Aucune attestation",
+            classe_css="bg-dark",
+            jours=None,
+        )
+    return statut_echeance(vehicule.date_fin_assurance)
+
+
+def statut_visite_technique(vehicule):
+    """Statut de la visite technique, avec la même distinction."""
+    if vehicule.document_visite_technique is None:
+        return StatutEcheance(
+            code=ECHEANCE_ABSENTE,
+            libelle="Aucun procès-verbal",
+            classe_css="bg-dark",
+            jours=None,
+        )
+    return statut_echeance(vehicule.date_visite_technique)
 
 
 def statut_permis(chauffeur):
@@ -423,6 +458,66 @@ def cloturer_mission(mission, *, date_arrivee, km_arrivee, commentaire=None):
     vehicule.save(update_fields=["kilometrage", "statut"])
 
     return mission
+
+
+# --- Flotte : entrée et sortie -----------------------------------------------
+
+
+@transaction.atomic
+def basculer_activation_vehicule(vehicule):
+    """Sort un véhicule de la flotte active, ou l'y fait revenir.
+
+    FleetFlow ne supprime pas : les clés étrangères sont en PROTECT et
+    l'historique d'exploitation doit rester consultable — c'est lui qui prouve
+    les coûts et le suivi d'entretien. « Supprimer » un véhicule, ici, veut
+    donc dire passer ``actif`` à False : il disparaît des listes de travail,
+    ses missions passées restent.
+
+    Un véhicule engagé sur une mission en cours ne peut pas sortir de la
+    flotte : sa mission n'aurait plus de véhicule affecté à un objet actif, et
+    le chauffeur resterait bloqué sans pouvoir clôturer proprement.
+    """
+    vehicule = Vehicule.objects.select_for_update().get(pk=vehicule.pk)
+
+    if vehicule.actif:
+        mission = missions_en_cours(vehicule=vehicule).first()
+        if mission is not None:
+            raise ValidationError(
+                f"Le véhicule {vehicule.immatriculation} est en mission vers "
+                f"{mission.destination}. Clôturez cette mission avant de le "
+                "sortir de la flotte."
+            )
+        vehicule.actif = False
+        # Un véhicule sorti de la flotte n'est pas « disponible » : laisser son
+        # statut à DISPONIBLE le ferait apparaître comme affectable dans les
+        # listes déroulantes.
+        vehicule.statut = Vehicule.Statut.HORS_SERVICE
+    else:
+        vehicule.actif = True
+        vehicule.statut = Vehicule.Statut.DISPONIBLE
+
+    vehicule.save(update_fields=["actif", "statut"])
+    return vehicule
+
+
+@transaction.atomic
+def basculer_activation_chauffeur(chauffeur):
+    """Désactive un chauffeur, ou le réactive. Même principe que le véhicule."""
+    chauffeur = Chauffeur.objects.select_for_update().get(pk=chauffeur.pk)
+
+    if chauffeur.actif:
+        mission = missions_en_cours(chauffeur=chauffeur).first()
+        if mission is not None:
+            raise ValidationError(
+                f"{chauffeur.nom} est en mission vers {mission.destination}. "
+                "Clôturez cette mission avant de le désactiver."
+            )
+        chauffeur.actif = False
+    else:
+        chauffeur.actif = True
+
+    chauffeur.save(update_fields=["actif"])
+    return chauffeur
 
 
 # --- Carburant ---------------------------------------------------------------

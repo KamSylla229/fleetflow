@@ -10,6 +10,7 @@ en bas de ce fichier.
 """
 
 from django.db import models
+from django.urls import reverse
 from django.utils import timezone
 
 
@@ -73,6 +74,16 @@ class Vehicule(models.Model):
 
     def __str__(self):
         return f"{self.immatriculation} — {self.marque} {self.modele}"
+
+    def get_absolute_url(self):
+        """L'adresse de la fiche de ce véhicule.
+
+        Django s'en sert seul : CreateView et UpdateView y redirigent après
+        enregistrement, et l'admin propose un lien « voir sur le site ».
+        Définir l'URL ici évite de répéter un success_url dans chaque vue, et
+        de devoir les corriger toutes le jour où l'adresse change.
+        """
+        return reverse("fleet:vehicule_detail", args=[self.pk])
 
     # --- Propriétés calculées ------------------------------------------------
     # Une @property n'est pas stockée en base : elle est recalculée à chaque
@@ -173,6 +184,9 @@ class Chauffeur(models.Model):
 
     def __str__(self):
         return self.nom
+
+    def get_absolute_url(self):
+        return reverse("fleet:chauffeur_detail", args=[self.pk])
 
     # --- Propriétés calculées ------------------------------------------------
 

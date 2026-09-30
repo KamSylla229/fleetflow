@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+
+{% block titre %}{{ vehicule.immatriculation }} — FleetFlow{% endblock %}
+
+{% block entete %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+  <div>
+    <h1 class="h3 mb-1">{{ vehicule.immatriculation }}</h1>
+    <p class="text-body-secondary mb-0">
+      {{ vehicule.marque }} {{ vehicule.modele }} — {{ vehicule.get_type_vehicule_display }},
+      mise en circulation en {{ vehicule.annee }}
+    </p>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-dark"
+       href="{% url 'fleet:vehicule_modifier' vehicule.pk %}">Modifier</a>
+
+    {% comment %}
+      La désactivation est une écriture : elle passe par un POST, avec le jeton
+      CSRF. onsubmit demande confirmation — une sécurité d'interface, jamais de
+      sécurité réelle : la vraie vérification est celle du service, qui refuse
+      de sortir un véhicule engagé sur une mission.
+    {% endcomment %}
+    <form method="post" action="{% url 'fleet:vehicule_activation' vehicule.pk %}"
+          onsubmit="return confirm('Confirmer le changement pour {{ vehicule.immatriculation }} ?');">
+      {% csrf_token %}
+      {% if vehicule.actif %}
+        <button type="submit" class="btn btn-outline-danger">
+          Sortir de la flotte
+        </button>
+      {% else %}
+        <button type="submit" class="btn btn-outline-success">
+          Réintégrer dans la flotte
+        </button>
+      {% endif %}
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block contenu %}
+
+{% if not vehicule.actif %}
+  <div class="alert alert-secondary">
+    Ce véhicule est sorti de la flotte active. Son historique reste consultable,
+    mais il ne peut plus recevoir de mission.
+  </div>
+{% endif %}
+
+<div class="row g-4">
+
+  <div class="col-lg-5">
+    <div class="card shadow-sm h-100">
+      <div class="card-header fw-semibold">Identité et état</div>
+      <div class="card-body">
+        <dl class="row mb-0">
+          <dt class="col-6">Statut</dt>
+          <dd class="col-6">{{ vehicule.get_statut_display }}</dd>
+
+          <dt class="col-6">Kilométrage</dt>
+          <dd class="col-6">{{ vehicule.kilometrage }} km</dd>
+
+          <dt class="col-6">Assurance</dt>
+          <dd class="col-6">
+            <span class="badge {{ statut_assurance.classe_css }}">
+              {{ statut_assurance.libelle }}
+            </span>
+          </dd>
+
+          <dt class="col-6">Visite technique</dt>
+          <dd class="col-6">
+            <span class="badge {{ statut_visite.classe_css }}">
+              {{ statut_visite.libelle }}
+            </span>
+          </dd>
+
+          <dt class="col-6">Chauffeur affecté</dt>
+          <dd class="col-6">
+            {% if mission_en_cours %}
+              <a href="{{ mission_en_cours.chauffeur.get_absolute_url }}">
+                {{ mission_en_cours.chauffeur.nom }}
+              </a>
+            {% else %}
+              <span class="text-body-secondary">aucun</span>
+            {% endif %}
+          </dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-7">
+    <div class="card shadow-sm h-100">
+      <div class="card-header fw-semibold">Mission en cours</div>
+      <div class="card-body">
+        {% if mission_en_cours %}
+          <p class="mb-1">
+            <span class="fw-semibold">
+              {{ mission_en_cours.depart }} → {{ mission_en_cours.destination }}
+            </span>
+          </p>
+          <p class="text-body-secondary small mb-2">
+            Partie le {{ mission_en_cours.date_depart|date:"d/m/Y" }}, compteur au
+            départ : {{ mission_en_cours.km_depart }} km.
+          </p>
+          {% if mission_en_cours.commentaire %}
+            <p class="mb-0 fst-italic">{{ mission_en_cours.commentaire }}</p>
+          {% endif %}
+        {% else %}
+          <p class="text-body-secondary mb-0">
+            Ce véhicule n'est engagé sur aucune mission : il peut être affecté.
+          </p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="card shadow-sm">
+      <div class="card-header fw-semibold">
+        Documents administratifs
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>Type</th>
+              <th>Numéro</th>
+              <th>Émis le</th>
+              <th>Expire le</th>
+              <th>État</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for document in documents %}
+              <tr>
+                <td>{{ document.get_type_document_display }}</td>
+                <td>{{ document.numero|default:"—" }}</td>
+                <td>{{ document.date_emission|date:"d/m/Y"|default:"—" }}</td>
+                <td>{{ document.date_expiration|date:"d/m/Y"|default:"—" }}</td>
+                <td>
+                  <span class="badge {{ document.statut.classe_css }}">
+                    {{ document.statut.libelle }}
+                  </span>
+                </td>
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="5" class="text-center text-body-secondary py-3">
+                  Aucun document enregistré. La saisie se fait pour l'instant
+                  depuis l'administration Django.
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  {% block fiche_activite %}
+    {% comment %}
+      L'historique des missions, des pleins et des entretiens complète cette
+      fiche au Jour 3. Le bloc est déclaré dès maintenant pour que la page
+      n'ait pas à être réorganisée à ce moment-là.
+    {% endcomment %}
+    <div class="col-12">
+      <p class="text-body-secondary small mb-0">
+        Historique des missions, des pleins et des entretiens : à venir.
+      </p>
+    </div>
+  {% endblock %}
+
+</div>
+
+{% endblock %}

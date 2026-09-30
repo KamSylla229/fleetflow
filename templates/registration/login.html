@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% comment %}
+Formulaire de connexion.
+
+Le chemin du fichier n'est pas libre : django.contrib.auth.views.LoginView
+cherche « registration/login.html ». C'est pour cela que ce gabarit vit dans
+templates/registration/ et non dans fleet/.
+{% endcomment %}
+
+{% block titre %}Connexion — FleetFlow{% endblock %}
+
+{% block contenu %}
+<div class="row justify-content-center">
+  <div class="col-md-5">
+    <div class="card shadow-sm">
+      <div class="card-body p-4">
+        <h1 class="h4 mb-1">Connexion</h1>
+        <p class="text-body-secondary small mb-4">
+          Accès réservé aux gestionnaires de la flotte.
+        </p>
+
+        {% if form.errors %}
+          {% comment %}
+            Un message volontairement vague : préciser « cet identifiant
+            n'existe pas » permettrait à un inconnu de deviner les comptes
+            valides un par un.
+          {% endcomment %}
+          <div class="alert alert-danger" role="alert">
+            Identifiant ou mot de passe incorrect.
+          </div>
+        {% endif %}
+
+        <form method="post">
+          {% csrf_token %}
+
+          <div class="mb-3">
+            <label for="{{ form.username.id_for_label }}" class="form-label">
+              Identifiant
+            </label>
+            <input type="text" name="{{ form.username.name }}"
+                   id="{{ form.username.id_for_label }}"
+                   class="form-control" autofocus required>
+          </div>
+
+          <div class="mb-3">
+            <label for="{{ form.password.id_for_label }}" class="form-label">
+              Mot de passe
+            </label>
+            <input type="password" name="{{ form.password.name }}"
+                   id="{{ form.password.id_for_label }}"
+                   class="form-control" required>
+          </div>
+
+          {% comment %}
+            LoginView place l'adresse demandée avant la redirection dans
+            « next ». La renvoyer telle quelle permet d'atterrir sur la page
+            voulue après connexion, plutôt que sur l'accueil.
+          {% endcomment %}
+          {% if next %}
+            <input type="hidden" name="next" value="{{ next }}">
+          {% endif %}
+
+          <button type="submit" class="btn btn-dark w-100">Se connecter</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
