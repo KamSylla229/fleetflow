@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% comment %}
+Squelette commun aux trois écrans de saisie du Jour 3 (mission, plein,
+entretien). Ils ont tous la même structure : un titre, une phrase
+d'explication, les champs, deux boutons. Seul le contenu change.
+
+Deux niveaux d'héritage, donc : base.html fournit la navigation et les
+messages, ce fichier la forme d'un écran de saisie, et chaque page fille ne
+remplit que ce qui lui est propre. Copier ce bloc trois fois marcherait aussi
+— jusqu'au jour où il faudrait le corriger trois fois.
+
+Le titre vient du contexte ({{ titre }}, posé par la vue) et non d'un bloc :
+il est affiché à deux endroits, dans l'onglet du navigateur et en tête de page,
+et une variable évite de le déclarer deux fois dans chaque page fille.
+
+Blocs à remplir par les pages filles :
+  - intro  : une phrase expliquant ce que fait l'écran (facultatif) ;
+  - avant  : un encart placé avant le formulaire (facultatif) ;
+  - retour : la cible du bouton « Annuler ».
+{% endcomment %}
+
+{% block titre %}{{ titre }} — FleetFlow{% endblock %}
+
+{% block entete %}
+<h1 class="h3 mb-3">{{ titre }}</h1>
+{% endblock %}
+
+{% block contenu %}
+<div class="row">
+  <div class="col-lg-7">
+
+    {% block avant %}{% endblock %}
+
+    <div class="card shadow-sm">
+      <div class="card-body">
+        {% block intro %}{% endblock %}
+
+        <form method="post">
+          {% csrf_token %}
+          {% include "partials/_champs_formulaire.html" %}
+
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-dark">Enregistrer</button>
+            <a class="btn btn-outline-secondary"
+               href="{% block retour %}{% url 'fleet:accueil' %}{% endblock %}">
+              Annuler
+            </a>
+          </div>
+        </form>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

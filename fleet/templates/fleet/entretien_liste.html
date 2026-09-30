@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block titre %}Entretiens — FleetFlow{% endblock %}
+
+{% block entete %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Entretiens</h1>
+  <a class="btn btn-dark" href="{% url 'fleet:entretien_creer' %}">Nouvel entretien</a>
+</div>
+{% endblock %}
+
+{% block contenu %}
+
+<form method="get" class="card card-body shadow-sm mb-3">
+  <div class="row g-2 align-items-end">
+
+    <div class="col-md-4">
+      <label for="vehicule" class="form-label small mb-1">Véhicule</label>
+      <select id="vehicule" name="vehicule" class="form-select">
+        <option value="">Tous</option>
+        {% for vehicule in vehicules %}
+          <option value="{{ vehicule.pk }}"
+                  {% if vehicule.pk|stringformat:"s" == vehicule_choisi %}selected{% endif %}>
+            {{ vehicule.immatriculation }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="col-md-2">
+      <label for="type" class="form-label small mb-1">Type</label>
+      <select id="type" name="type" class="form-select">
+        <option value="">Tous</option>
+        {% for valeur, libelle in types %}
+          <option value="{{ valeur }}"
+                  {% if valeur == type_choisi %}selected{% endif %}>{{ libelle }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    {% include "partials/_filtre_periode.html" %}
+
+    <div class="col-md-2 d-flex gap-2">
+      <button type="submit" class="btn btn-secondary w-100">Filtrer</button>
+      <a href="{% url 'fleet:entretien_liste' %}" class="btn btn-outline-secondary"
+         title="Réinitialiser">×</a>
+    </div>
+
+  </div>
+</form>
+
+<div class="card shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Date</th>
+          <th>Véhicule</th>
+          <th>Intervention</th>
+          <th>Prestataire</th>
+          <th class="text-end">Au compteur</th>
+          <th class="text-end">Coût</th>
+          <th>Prochaine échéance</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entretien in entretiens %}
+          <tr>
+            <td>{{ entretien.date|date:"d/m/Y" }}</td>
+            <td>
+              <a href="{{ entretien.vehicule.get_absolute_url }}">
+                {{ entretien.vehicule.immatriculation }}
+              </a>
+            </td>
+            <td>{{ entretien.get_type_entretien_display }}</td>
+            <td>{{ entretien.prestataire }}</td>
+            <td class="text-end">{{ entretien.km }} km</td>
+            <td class="text-end">{{ entretien.cout|floatformat:0 }} FCFA</td>
+            <td>
+              {% comment %}
+                statut est attaché par la vue, à partir de
+                services.statut_prochain_entretien() : il compare l'échéance
+                kilométrique au compteur actuel du véhicule. Le badge est donc
+                « en retard » dès que le camion a dépassé l'échéance, même si
+                l'intervention est récente.
+              {% endcomment %}
+              <span class="badge {{ entretien.statut.classe_css }}">
+                {{ entretien.statut.libelle }}
+              </span>
+              {% if entretien.prochaine_echeance_km %}
+                <span class="text-body-secondary small d-block">
+                  à {{ entretien.prochaine_echeance_km }} km
+                </span>
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="7" class="text-center text-body-secondary py-4">
+              Aucun entretien ne correspond à ces critères.
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% include "partials/_pagination.html" %}
+
+{% endblock %}

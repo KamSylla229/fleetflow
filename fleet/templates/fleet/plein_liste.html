@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block titre %}Carburant — FleetFlow{% endblock %}
+
+{% block entete %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Pleins de carburant</h1>
+  <a class="btn btn-dark" href="{% url 'fleet:plein_creer' %}">Nouveau plein</a>
+</div>
+{% endblock %}
+
+{% block contenu %}
+
+<form method="get" class="card card-body shadow-sm mb-3">
+  <div class="row g-2 align-items-end">
+
+    <div class="col-md-4">
+      <label for="vehicule" class="form-label small mb-1">Véhicule</label>
+      <select id="vehicule" name="vehicule" class="form-select">
+        <option value="">Tous</option>
+        {% for vehicule in vehicules %}
+          <option value="{{ vehicule.pk }}"
+                  {% if vehicule.pk|stringformat:"s" == vehicule_choisi %}selected{% endif %}>
+            {{ vehicule.immatriculation }} — {{ vehicule.marque }} {{ vehicule.modele }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    {% include "partials/_filtre_periode.html" %}
+
+    <div class="col-md-4 d-flex gap-2">
+      <button type="submit" class="btn btn-secondary">Filtrer</button>
+      <a href="{% url 'fleet:plein_liste' %}" class="btn btn-outline-secondary">
+        Réinitialiser
+      </a>
+    </div>
+
+  </div>
+</form>
+
+<div class="card shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Date</th>
+          <th>Véhicule</th>
+          <th>Chauffeur</th>
+          <th class="text-end">Litres</th>
+          <th class="text-end">Prix/L</th>
+          <th class="text-end">Coût</th>
+          <th class="text-end">Compteur</th>
+          <th class="text-end">Consommation</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for plein in pleins %}
+          <tr>
+            <td>{{ plein.date|date:"d/m/Y" }}</td>
+            <td>
+              <a href="{{ plein.vehicule.get_absolute_url }}">
+                {{ plein.vehicule.immatriculation }}
+              </a>
+            </td>
+            <td>{{ plein.chauffeur.nom }}</td>
+            <td class="text-end">{{ plein.litres }} L</td>
+            <td class="text-end">{{ plein.prix_litre }}</td>
+            {# cout_total est une propriété du modèle : le gabarit n'a aucun
+               calcul à faire, et la multiplication reste en Decimal. #}
+            <td class="text-end">{{ plein.cout_total|floatformat:0 }} FCFA</td>
+            <td class="text-end">{{ plein.km_compteur }} km</td>
+            <td class="text-end">
+              {% comment %}
+                consommation est attachée par services.annoter_consommations().
+                Elle vaut None pour le premier plein d'un véhicule : il n'y a
+                pas de distance parcourue à laquelle rapporter le volume.
+              {% endcomment %}
+              {% if plein.consommation is not None %}
+                <span class="fw-semibold">{{ plein.consommation }}</span>
+                <span class="text-body-secondary small">L/100 km</span>
+              {% else %}
+                <span class="text-body-secondary" title="Premier plein connu pour ce véhicule">
+                  —
+                </span>
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="8" class="text-center text-body-secondary py-4">
+              Aucun plein ne correspond à ces critères.
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% include "partials/_pagination.html" %}
+
+{% endblock %}

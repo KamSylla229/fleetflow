@@ -63,4 +63,28 @@ urlpatterns = [
         views.chauffeur_basculer_activation,
         name="chauffeur_activation",
     ),
+    # --- Missions ---
+    path("missions/", views.MissionListView.as_view(), name="mission_liste"),
+    path(
+        "missions/nouvelle/",
+        views.MissionCreateView.as_view(),
+        name="mission_creer",
+    ),
+    path(
+        "missions/<int:pk>/cloturer/",
+        views.MissionClotureView.as_view(),
+        name="mission_cloturer",
+    ),
+    # --- Carburant ---
+    path("carburant/", views.PleinListView.as_view(), name="plein_liste"),
+    path("carburant/nouveau/", views.PleinCreateView.as_view(), name="plein_creer"),
+    # --- Entretiens ---
+    path("entretiens/", views.EntretienListView.as_view(), name="entretien_liste"),
+    path(
+        "entretiens/nouveau/",
+        views.EntretienCreateView.as_view(),
+        name="entretien_creer",
+    ),
+    # --- Documents ---
+    path("documents/", views.DocumentListView.as_view(), name="document_liste"),
 ]

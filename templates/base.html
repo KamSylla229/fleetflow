@@ -88,17 +88,22 @@ Les blocs que les pages filles remplissent :
              class="list-group-item list-group-item-action{% if 'chauffeur' in request.resolver_match.url_name %} active{% endif %}">
             Chauffeurs
           </a>
-          {% block navigation_jour3 %}
-            {% comment %}
-              Missions, Carburant, Entretiens et Documents arrivent au Jour 3.
-              Les entrées sont affichées désactivées plutôt que masquées : la
-              structure de l'application est ainsi visible dès maintenant.
-            {% endcomment %}
-            <span class="list-group-item disabled">Missions</span>
-            <span class="list-group-item disabled">Carburant</span>
-            <span class="list-group-item disabled">Entretiens</span>
-            <span class="list-group-item disabled">Documents</span>
-          {% endblock %}
+          <a href="{% url 'fleet:mission_liste' %}"
+             class="list-group-item list-group-item-action{% if 'mission' in request.resolver_match.url_name %} active{% endif %}">
+            Missions
+          </a>
+          <a href="{% url 'fleet:plein_liste' %}"
+             class="list-group-item list-group-item-action{% if 'plein' in request.resolver_match.url_name %} active{% endif %}">
+            Carburant
+          </a>
+          <a href="{% url 'fleet:entretien_liste' %}"
+             class="list-group-item list-group-item-action{% if 'entretien' in request.resolver_match.url_name %} active{% endif %}">
+            Entretiens
+          </a>
+          <a href="{% url 'fleet:document_liste' %}"
+             class="list-group-item list-group-item-action{% if 'document' in request.resolver_match.url_name %} active{% endif %}">
+            Documents
+          </a>
         </div>
       </aside>
     {% endif %}

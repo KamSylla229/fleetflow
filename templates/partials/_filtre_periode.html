@@ -1,0 +1,15 @@
+{% comment %}
+Les deux bornes de date, communes aux listes missions, carburant et entretiens.
+
+Les valeurs saisies sont réaffichées ({{ debut }}, {{ fin }}, préparées par
+_contexte_periode dans les vues) : un formulaire de filtre qui se vide après
+envoi oblige à tout resaisir pour corriger une seule borne.
+{% endcomment %}
+<div class="col-md-2">
+  <label for="debut" class="form-label small mb-1">Du</label>
+  <input type="date" id="debut" name="debut" value="{{ debut }}" class="form-control">
+</div>
+<div class="col-md-2">
+  <label for="fin" class="form-label small mb-1">Au</label>
+  <input type="date" id="fin" name="fin" value="{{ fin }}" class="form-control">
+</div>

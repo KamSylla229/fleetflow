@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block titre %}Missions — FleetFlow{% endblock %}
+
+{% block entete %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Missions</h1>
+  <a class="btn btn-dark" href="{% url 'fleet:mission_creer' %}">Nouvelle mission</a>
+</div>
+{% endblock %}
+
+{% block contenu %}
+
+<form method="get" class="card card-body shadow-sm mb-3">
+  <div class="row g-2 align-items-end">
+
+    <div class="col-md-3">
+      <label for="vehicule" class="form-label small mb-1">Véhicule</label>
+      <select id="vehicule" name="vehicule" class="form-select">
+        <option value="">Tous</option>
+        {% for vehicule in vehicules %}
+          {# La comparaison se fait sur des chaînes : la valeur du GET en est une. #}
+          <option value="{{ vehicule.pk }}"
+                  {% if vehicule.pk|stringformat:"s" == vehicule_choisi %}selected{% endif %}>
+            {{ vehicule.immatriculation }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="col-md-3">
+      <label for="chauffeur" class="form-label small mb-1">Chauffeur</label>
+      <select id="chauffeur" name="chauffeur" class="form-select">
+        <option value="">Tous</option>
+        {% for chauffeur in chauffeurs %}
+          <option value="{{ chauffeur.pk }}"
+                  {% if chauffeur.pk|stringformat:"s" == chauffeur_choisi %}selected{% endif %}>
+            {{ chauffeur.nom }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="col-md-2">
+      <label for="statut" class="form-label small mb-1">Statut</label>
+      <select id="statut" name="statut" class="form-select">
+        <option value="">Tous</option>
+        {% for valeur, libelle in statuts %}
+          <option value="{{ valeur }}"
+                  {% if valeur == statut_choisi %}selected{% endif %}>{{ libelle }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    {% include "partials/_filtre_periode.html" %}
+
+    <div class="col-md-12 d-flex gap-2 mt-2">
+      <button type="submit" class="btn btn-secondary">Filtrer</button>
+      <a href="{% url 'fleet:mission_liste' %}" class="btn btn-outline-secondary">
+        Réinitialiser
+      </a>
+    </div>
+
+  </div>
+</form>
+
+<div class="card shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Départ</th>
+          <th>Trajet</th>
+          <th>Véhicule</th>
+          <th>Chauffeur</th>
+          <th>Statut</th>
+          <th class="text-end">Distance</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for mission in missions %}
+          <tr>
+            <td>{{ mission.date_depart|date:"d/m/Y" }}</td>
+            <td>{{ mission.depart }} → {{ mission.destination }}</td>
+            <td>
+              <a href="{{ mission.vehicule.get_absolute_url }}">
+                {{ mission.vehicule.immatriculation }}
+              </a>
+            </td>
+            <td>
+              <a href="{{ mission.chauffeur.get_absolute_url }}">
+                {{ mission.chauffeur.nom }}
+              </a>
+            </td>
+            <td>
+              {% if mission.statut == "en_cours" %}
+                <span class="badge bg-primary">En cours</span>
+              {% elif mission.statut == "terminee" %}
+                <span class="badge bg-success">Terminée</span>
+              {% elif mission.statut == "annulee" %}
+                <span class="badge bg-secondary">Annulée</span>
+              {% else %}
+                <span class="badge bg-info text-dark">Planifiée</span>
+              {% endif %}
+            </td>
+            <td class="text-end">
+              {# distance vaut None tant que la mission n'est pas clôturée. #}
+              {% if mission.distance is not None %}
+                {{ mission.distance }} km
+              {% else %}
+                <span class="text-body-secondary">—</span>
+              {% endif %}
+            </td>
+            <td class="text-end">
+              {% if mission.statut == "en_cours" %}
+                <a class="btn btn-sm btn-dark"
+                   href="{% url 'fleet:mission_cloturer' mission.pk %}">Clôturer</a>
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="7" class="text-center text-body-secondary py-4">
+              Aucune mission ne correspond à ces critères.
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% include "partials/_pagination.html" %}
+
+{% endblock %}

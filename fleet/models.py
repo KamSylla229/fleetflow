@@ -421,6 +421,20 @@ class PleinCarburant(models.Model):
     def __str__(self):
         return f"{self.vehicule.immatriculation} — {self.litres} L ({self.date})"
 
+    @property
+    def cout_total(self):
+        """Montant dépensé pour ce plein, en FCFA.
+
+        Le produit est fait en Decimal, comme les deux champs dont il vient :
+        repasser par un flottant pour multiplier réintroduirait exactement les
+        arrondis que DecimalField sert à éviter.
+
+        Ce n'est pas stocké, pour la même raison que Mission.distance : la
+        valeur se déduit de deux champs de la même ligne, et un troisième champ
+        à maintenir cohérent serait une occasion de se contredire.
+        """
+        return self.litres * self.prix_litre
+
 
 class Document(models.Model):
     """Une pièce administrative rattachée à un véhicule, avec son échéance.

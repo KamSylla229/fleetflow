@@ -1,0 +1,11 @@
+{% extends "fleet/saisie_base.html" %}
+
+{% block intro %}
+<p class="text-body-secondary small">
+  On enregistre ici une intervention déjà réalisée. La prochaine échéance
+  kilométrique est calculée automatiquement d'après le type d'intervention, sauf
+  si vous la saisissez vous-même.
+</p>
+{% endblock %}
+
+{% block retour %}{% url 'fleet:entretien_liste' %}{% endblock %}

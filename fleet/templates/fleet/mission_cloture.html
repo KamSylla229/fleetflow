@@ -1,0 +1,44 @@
+{% extends "fleet/saisie_base.html" %}
+
+{% block avant %}
+<div class="card shadow-sm mb-3">
+  <div class="card-header fw-semibold">Mission à clôturer</div>
+  <div class="card-body">
+    <dl class="row mb-0">
+      <dt class="col-5">Trajet</dt>
+      <dd class="col-7">{{ mission.depart }} → {{ mission.destination }}</dd>
+
+      <dt class="col-5">Véhicule</dt>
+      <dd class="col-7">
+        <a href="{{ mission.vehicule.get_absolute_url }}">
+          {{ mission.vehicule.immatriculation }}
+        </a>
+      </dd>
+
+      <dt class="col-5">Chauffeur</dt>
+      <dd class="col-7">
+        <a href="{{ mission.chauffeur.get_absolute_url }}">
+          {{ mission.chauffeur.nom }}
+        </a>
+      </dd>
+
+      <dt class="col-5">Départ</dt>
+      <dd class="col-7">
+        le {{ mission.date_depart|date:"d/m/Y" }}, à {{ mission.km_depart }} km
+      </dd>
+
+      <dt class="col-5">Statut</dt>
+      <dd class="col-7">{{ mission.get_statut_display }}</dd>
+    </dl>
+  </div>
+</div>
+{% endblock %}
+
+{% block intro %}
+<p class="text-body-secondary small">
+  Le kilométrage d'arrivée doit dépasser celui du départ
+  ({{ mission.km_depart }} km). Il mettra à jour le compteur du véhicule.
+</p>
+{% endblock %}
+
+{% block retour %}{% url 'fleet:mission_liste' %}{% endblock %}

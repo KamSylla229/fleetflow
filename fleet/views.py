@@ -21,18 +21,27 @@ from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.views.decorators.http import require_POST
 from django.views.generic import (
     CreateView,
     DetailView,
+    FormView,
     ListView,
     RedirectView,
     UpdateView,
 )
 
 from . import services
-from .forms import ChauffeurForm, VehiculeForm
-from .models import Chauffeur, Vehicule
+from .forms import (
+    ChauffeurForm,
+    ClotureMissionForm,
+    EntretienForm,
+    MissionForm,
+    PleinCarburantForm,
+    VehiculeForm,
+)
+from .models import Chauffeur, Document, Entretien, Mission, PleinCarburant, Vehicule
 
 
 class AccueilView(LoginRequiredMixin, RedirectView):
@@ -144,6 +153,23 @@ class VehiculeDetailView(LoginRequiredMixin, DetailView):
             .select_related("chauffeur")
             .first()
         )
+
+        # Trois requêtes de plus, chacune limitée à dix lignes et accompagnée
+        # d'un select_related pour l'objet lié affiché. Les modèles trient déjà
+        # du plus récent au plus ancien (ordering dans leur Meta) : le [:10]
+        # donne donc bien les dix derniers, et non dix au hasard.
+        contexte["missions"] = vehicule.missions.select_related("chauffeur")[:10]
+        contexte["pleins"] = services.annoter_consommations(
+            vehicule.pleins.select_related("chauffeur")[:10]
+        )
+
+        entretiens = list(vehicule.entretiens.all()[:10])
+        for entretien in entretiens:
+            entretien.statut = services.statut_prochain_entretien(
+                entretien, vehicule.kilometrage
+            )
+        contexte["entretiens"] = entretiens
+
         return contexte
 
 
@@ -265,6 +291,10 @@ class ChauffeurDetailView(LoginRequiredMixin, DetailView):
             .select_related("vehicule")
             .first()
         )
+        # Les vingt dernières missions : de quoi juger l'activité récente d'un
+        # chauffeur sans charger cinq ans d'historique. L'intégralité reste
+        # accessible depuis la liste des missions, filtrée sur ce chauffeur.
+        contexte["missions"] = self.object.missions.select_related("vehicule")[:20]
         return contexte
 
 
@@ -311,3 +341,394 @@ def chauffeur_basculer_activation(request, pk):
                 "conservé.",
             )
     return redirect(reverse("fleet:chauffeur_detail", args=[chauffeur.pk]))
+
+
+# --- Filtres partagés --------------------------------------------------------
+
+
+def _filtrer_periode(queryset, requete, champ):
+    """Applique les filtres de période ?debut=&fin= sur un champ de date.
+
+    Les dates arrivent de la chaîne de requête, donc sous forme de texte, et
+    d'une source que l'on ne contrôle pas. parse_date les convertit et renvoie
+    None si le format ne correspond pas ; une date bien formée mais inexistante
+    (« 2026-02-31 ») lève ValueError. Dans les deux cas on ignore le filtre
+    plutôt que de renvoyer une erreur 500 : une adresse bricolée à la main ne
+    doit pas casser la page.
+    """
+    for parametre, operateur in (("debut", "gte"), ("fin", "lte")):
+        texte = requete.GET.get(parametre, "")
+        if not texte:
+            continue
+        try:
+            valeur = parse_date(texte)
+        except ValueError:
+            valeur = None
+        if valeur is not None:
+            queryset = queryset.filter(**{f"{champ}__{operateur}": valeur})
+    return queryset
+
+
+def _contexte_periode(requete):
+    """Renvoie les bornes saisies, pour les réafficher dans le formulaire."""
+    return {
+        "debut": requete.GET.get("debut", ""),
+        "fin": requete.GET.get("fin", ""),
+    }
+
+
+# --- Missions ----------------------------------------------------------------
+
+
+class MissionListView(ListeFiltrableView):
+    model = Mission
+    template_name = "fleet/mission_liste.html"
+    context_object_name = "missions"
+
+    def get_queryset(self):
+        # select_related : le véhicule et le chauffeur sont affichés sur chaque
+        # ligne. Sans lui, vingt-cinq missions déclencheraient cinquante
+        # requêtes de plus.
+        queryset = Mission.objects.select_related("vehicule", "chauffeur")
+
+        vehicule = self.request.GET.get("vehicule", "")
+        if vehicule.isdigit():
+            queryset = queryset.filter(vehicule_id=vehicule)
+
+        chauffeur = self.request.GET.get("chauffeur", "")
+        if chauffeur.isdigit():
+            queryset = queryset.filter(chauffeur_id=chauffeur)
+
+        statut = self.request.GET.get("statut", "")
+        if statut:
+            queryset = queryset.filter(statut=statut)
+
+        return _filtrer_periode(queryset, self.request, "date_depart")
+
+    def get_context_data(self, **kwargs):
+        contexte = super().get_context_data(**kwargs)
+        contexte.update(_contexte_periode(self.request))
+        contexte["vehicules"] = Vehicule.objects.all()
+        contexte["chauffeurs"] = Chauffeur.objects.all()
+        contexte["statuts"] = Mission.Statut.choices
+        contexte["vehicule_choisi"] = self.request.GET.get("vehicule", "")
+        contexte["chauffeur_choisi"] = self.request.GET.get("chauffeur", "")
+        contexte["statut_choisi"] = self.request.GET.get("statut", "")
+        return contexte
+
+
+class MissionCreateView(LoginRequiredMixin, FormView):
+    """Affectation d'une mission, déléguée à services.creer_mission().
+
+    Une FormView et non une CreateView : c'est le service qui crée l'objet, pas
+    le formulaire. CreateView appellerait form.save() et court-circuiterait
+    toutes les vérifications d'engagement.
+    """
+
+    template_name = "fleet/mission_form.html"
+    form_class = MissionForm
+
+    def get_initial(self):
+        # La date du jour est pré-remplie : c'est le cas courant, et le service
+        # refuse de toute façon une date future.
+        return {"date_depart": timezone.localdate()}
+
+    def get_context_data(self, **kwargs):
+        contexte = super().get_context_data(**kwargs)
+        contexte["titre"] = "Nouvelle mission"
+        return contexte
+
+    def form_valid(self, form):
+        donnees = form.cleaned_data
+        try:
+            mission = services.creer_mission(
+                vehicule=donnees["vehicule"],
+                chauffeur=donnees["chauffeur"],
+                depart=donnees["depart"],
+                destination=donnees["destination"],
+                date_depart=donnees["date_depart"],
+                km_depart=donnees["km_depart"],
+                commentaire=donnees["commentaire"],
+            )
+        except ValidationError as erreur:
+            # form_invalid réaffiche le formulaire avec les valeurs saisies :
+            # l'utilisateur n'a pas à tout retaper pour corriger un choix.
+            messages.error(self.request, " ".join(erreur.messages))
+            return self.form_invalid(form)
+
+        messages.success(
+            self.request,
+            f"Mission {mission.depart} - {mission.destination} ouverte avec "
+            f"{mission.vehicule.immatriculation} et {mission.chauffeur.nom}.",
+        )
+        return redirect("fleet:mission_liste")
+
+
+class MissionClotureView(LoginRequiredMixin, FormView):
+    """Saisie des relevés de retour, déléguée à services.cloturer_mission()."""
+
+    template_name = "fleet/mission_cloture.html"
+    form_class = ClotureMissionForm
+
+    def dispatch(self, request, *args, **kwargs):
+        # On charge la mission avant toute chose : les deux méthodes get() et
+        # post() en ont besoin, et dispatch() est le seul endroit traversé par
+        # les deux.
+        self.mission = get_object_or_404(
+            Mission.objects.select_related("vehicule", "chauffeur"), pk=kwargs["pk"]
+        )
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_initial(self):
+        return {
+            "date_arrivee": timezone.localdate(),
+            "km_arrivee": self.mission.km_depart,
+            "commentaire": self.mission.commentaire,
+        }
+
+    def get_context_data(self, **kwargs):
+        contexte = super().get_context_data(**kwargs)
+        contexte["mission"] = self.mission
+        contexte["titre"] = (
+            f"Clôturer la mission {self.mission.depart} - {self.mission.destination}"
+        )
+        return contexte
+
+    def form_valid(self, form):
+        donnees = form.cleaned_data
+        try:
+            mission = services.cloturer_mission(
+                self.mission,
+                date_arrivee=donnees["date_arrivee"],
+                km_arrivee=donnees["km_arrivee"],
+                commentaire=donnees["commentaire"],
+            )
+        except ValidationError as erreur:
+            messages.error(self.request, " ".join(erreur.messages))
+            return self.form_invalid(form)
+
+        messages.success(
+            self.request,
+            f"Mission clôturée : {mission.distance} km parcourus. Le compteur de "
+            f"{mission.vehicule.immatriculation} est à "
+            f"{mission.vehicule.kilometrage} km.",
+        )
+        return redirect("fleet:mission_liste")
+
+
+# --- Carburant ---------------------------------------------------------------
+
+
+class PleinListView(ListeFiltrableView):
+    model = PleinCarburant
+    template_name = "fleet/plein_liste.html"
+    context_object_name = "pleins"
+
+    def get_queryset(self):
+        queryset = PleinCarburant.objects.select_related("vehicule", "chauffeur")
+
+        vehicule = self.request.GET.get("vehicule", "")
+        if vehicule.isdigit():
+            queryset = queryset.filter(vehicule_id=vehicule)
+
+        return _filtrer_periode(queryset, self.request, "date")
+
+    def get_context_data(self, **kwargs):
+        contexte = super().get_context_data(**kwargs)
+        # annoter_consommations complète chaque plein affiché avec sa
+        # consommation, en une seule requête pour toute la page. Le calcul a
+        # besoin du plein précédent de chaque véhicule, qui peut se trouver sur
+        # une autre page de la liste : c'est pourquoi il relit l'historique
+        # plutôt que de se contenter des lignes affichées.
+        services.annoter_consommations(contexte["pleins"])
+
+        contexte.update(_contexte_periode(self.request))
+        contexte["vehicules"] = Vehicule.objects.all()
+        contexte["vehicule_choisi"] = self.request.GET.get("vehicule", "")
+        return contexte
+
+
+class PleinCreateView(LoginRequiredMixin, FormView):
+    template_name = "fleet/plein_form.html"
+    form_class = PleinCarburantForm
+
+    def get_initial(self):
+        return {"date": timezone.localdate()}
+
+    def get_context_data(self, **kwargs):
+        contexte = super().get_context_data(**kwargs)
+        contexte["titre"] = "Nouveau plein de carburant"
+        return contexte
+
+    def form_valid(self, form):
+        donnees = form.cleaned_data
+        try:
+            plein, consommation = services.enregistrer_plein(
+                vehicule=donnees["vehicule"],
+                chauffeur=donnees["chauffeur"],
+                date=donnees["date"],
+                litres=donnees["litres"],
+                prix_litre=donnees["prix_litre"],
+                km_compteur=donnees["km_compteur"],
+            )
+        except ValidationError as erreur:
+            messages.error(self.request, " ".join(erreur.messages))
+            return self.form_invalid(form)
+
+        cout = plein.cout_total
+        if consommation is None:
+            # Premier plein du véhicule : le dire explicitement vaut mieux que
+            # d'afficher un tiret sans explication.
+            messages.success(
+                self.request,
+                f"Plein enregistré pour {plein.vehicule.immatriculation} : "
+                f"{plein.litres} L, {cout:.0f} FCFA. C'est le premier plein de "
+                "ce véhicule, la consommation sera calculée au suivant.",
+            )
+        else:
+            messages.success(
+                self.request,
+                f"Plein enregistré pour {plein.vehicule.immatriculation} : "
+                f"{plein.litres} L, {cout:.0f} FCFA, consommation "
+                f"{consommation} L/100 km.",
+            )
+        return redirect("fleet:plein_liste")
+
+
+# --- Entretiens --------------------------------------------------------------
+
+
+class EntretienListView(ListeFiltrableView):
+    model = Entretien
+    template_name = "fleet/entretien_liste.html"
+    context_object_name = "entretiens"
+
+    def get_queryset(self):
+        queryset = Entretien.objects.select_related("vehicule")
+
+        vehicule = self.request.GET.get("vehicule", "")
+        if vehicule.isdigit():
+            queryset = queryset.filter(vehicule_id=vehicule)
+
+        type_entretien = self.request.GET.get("type", "")
+        if type_entretien:
+            queryset = queryset.filter(type_entretien=type_entretien)
+
+        return _filtrer_periode(queryset, self.request, "date")
+
+    def get_context_data(self, **kwargs):
+        contexte = super().get_context_data(**kwargs)
+
+        # Le badge « à venir / en retard » compare l'échéance kilométrique au
+        # compteur actuel du véhicule, déjà chargé par select_related.
+        for entretien in contexte["entretiens"]:
+            entretien.statut = services.statut_prochain_entretien(
+                entretien, entretien.vehicule.kilometrage
+            )
+
+        contexte.update(_contexte_periode(self.request))
+        contexte["vehicules"] = Vehicule.objects.all()
+        contexte["types"] = Entretien.TypeEntretien.choices
+        contexte["vehicule_choisi"] = self.request.GET.get("vehicule", "")
+        contexte["type_choisi"] = self.request.GET.get("type", "")
+        return contexte
+
+
+class EntretienCreateView(LoginRequiredMixin, FormView):
+    template_name = "fleet/entretien_form.html"
+    form_class = EntretienForm
+
+    def get_initial(self):
+        return {"date": timezone.localdate()}
+
+    def get_context_data(self, **kwargs):
+        contexte = super().get_context_data(**kwargs)
+        contexte["titre"] = "Nouvel entretien"
+        return contexte
+
+    def form_valid(self, form):
+        donnees = form.cleaned_data
+        try:
+            entretien = services.enregistrer_entretien(
+                vehicule=donnees["vehicule"],
+                type_entretien=donnees["type_entretien"],
+                date=donnees["date"],
+                km=donnees["km"],
+                cout=donnees["cout"],
+                prestataire=donnees["prestataire"],
+                prochaine_echeance_km=donnees["prochaine_echeance_km"],
+            )
+        except ValidationError as erreur:
+            messages.error(self.request, " ".join(erreur.messages))
+            return self.form_invalid(form)
+
+        if entretien.prochaine_echeance_km is None:
+            complement = "Aucune échéance kilométrique pour ce type d'intervention."
+        else:
+            complement = f"Prochaine échéance à {entretien.prochaine_echeance_km} km."
+        messages.success(
+            self.request,
+            f"{entretien.get_type_entretien_display()} enregistrée pour "
+            f"{entretien.vehicule.immatriculation}. {complement}",
+        )
+        return redirect("fleet:entretien_liste")
+
+
+# --- Documents ---------------------------------------------------------------
+
+
+class DocumentListView(ListeFiltrableView):
+    """Toutes les pièces administratives de la flotte, avec leur état.
+
+    La saisie n'est pas proposée ici : elle passe pour l'instant par
+    l'administration Django, où les documents se remplissent directement depuis
+    la fiche du véhicule. C'est une limite assumée du périmètre de ce jour,
+    inscrite au BACKLOG.
+    """
+
+    model = Document
+    template_name = "fleet/document_liste.html"
+    context_object_name = "documents"
+
+    def get_queryset(self):
+        queryset = Document.objects.select_related("vehicule")
+
+        vehicule = self.request.GET.get("vehicule", "")
+        if vehicule.isdigit():
+            queryset = queryset.filter(vehicule_id=vehicule)
+
+        type_document = self.request.GET.get("type", "")
+        if type_document:
+            queryset = queryset.filter(type_document=type_document)
+
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        contexte = super().get_context_data(**kwargs)
+
+        documents = list(contexte["documents"])
+        for document in documents:
+            document.statut = services.statut_echeance(document.date_expiration)
+
+        # Filtrer sur l'état ne peut pas se faire en SQL : « expiré » et
+        # « bientôt expiré » sont calculés par rapport à la date du jour par
+        # statut_echeance(), qui n'existe qu'en Python. On filtre donc la page
+        # déjà chargée. La conséquence à connaître : ce filtre s'applique après
+        # la pagination, il n'agit que sur les lignes de la page courante.
+        etat = self.request.GET.get("etat", "")
+        if etat == "alerte":
+            documents = [
+                document for document in documents if document.statut.est_alerte
+            ]
+        elif etat:
+            documents = [
+                document for document in documents if document.statut.code == etat
+            ]
+        contexte["documents"] = documents
+
+        contexte["vehicules"] = Vehicule.objects.all()
+        contexte["types"] = Document.TypeDocument.choices
+        contexte["vehicule_choisi"] = self.request.GET.get("vehicule", "")
+        contexte["type_choisi"] = self.request.GET.get("type", "")
+        contexte["etat_choisi"] = etat
+        return contexte

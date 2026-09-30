@@ -1,0 +1,11 @@
+{% extends "fleet/saisie_base.html" %}
+
+{% block intro %}
+<p class="text-body-secondary small">
+  La mission démarre immédiatement : le véhicule et le chauffeur choisis seront
+  engagés jusqu'à sa clôture, et ne pourront pas recevoir d'autre mission
+  entre-temps.
+</p>
+{% endblock %}
+
+{% block retour %}{% url 'fleet:mission_liste' %}{% endblock %}
