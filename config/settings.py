@@ -61,7 +61,7 @@ ROOT_URLCONF = 'config.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        "DIRS": [BASE_DIR / "templates"],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -104,6 +104,23 @@ AUTH_PASSWORD_VALIDATORS = [
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
     },
 ]
+
+
+# Authentification
+# https://docs.djangoproject.com/en/5.2/topics/auth/default/
+
+# Vers quelle page @login_required / LoginRequiredMixin renvoie un visiteur
+# non connecte. C'est le nom de route fourni par django.contrib.auth.urls.
+LOGIN_URL = "login"
+
+# Apres une connexion reussie, on arrive sur la liste des vehicules : le
+# tableau de bord avec indicateurs n'existe pas encore (prevu plus tard).
+# Django resout ce nom de route au moment de la redirection, pas au demarrage :
+# la route peut donc etre definie plus tard sans casser le projet.
+LOGIN_REDIRECT_URL = "fleet:vehicule_liste"
+
+# Apres une deconnexion, retour au formulaire de connexion.
+LOGOUT_REDIRECT_URL = "login"
 
 
 # Internationalization

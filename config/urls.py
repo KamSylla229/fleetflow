@@ -1,22 +1,19 @@
-"""
-URL configuration for config project.
+"""Routes de premier niveau du projet FleetFlow.
 
-The `urlpatterns` list routes URLs to views. For more information please see:
-    https://docs.djangoproject.com/en/5.2/topics/http/urls/
-Examples:
-Function views
-    1. Add an import:  from my_app import views
-    2. Add a URL to urlpatterns:  path('', views.home, name='home')
-Class-based views
-    1. Add an import:  from other_app.views import Home
-    2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
-Including another URLconf
-    1. Import the include() function: from django.urls import include, path
-    2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
+Ce fichier ne contient que l'aiguillage general. Les routes metier vivent dans
+fleet/urls.py, incluses ici sous leur propre espace de noms.
 """
+
 from django.contrib import admin
-from django.urls import path
+from django.urls import include, path
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
+    path("admin/", admin.site.urls),
+    # django.contrib.auth.urls fournit des vues deja ecrites et testees par
+    # Django : login, logout, changement et reinitialisation de mot de passe.
+    # Elles cherchent leurs gabarits dans templates/registration/ ; nous ne
+    # fournissons que login.html, les autres routes restant inutilisees pour
+    # l'instant. Reecrire une vue de connexion a la main serait du code en
+    # plus a maintenir, et une occasion de se tromper sur la securite.
+    path("", include("django.contrib.auth.urls")),
 ]
