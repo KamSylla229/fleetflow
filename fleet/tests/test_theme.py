@@ -367,3 +367,128 @@ class PaginationTest(TestCase):
                     reverse("fleet:document_liste"), {"page": page}
                 )
                 self.assertEqual(reponse.status_code, 404)
+
+
+class SyntaxeDesGabaritsTest(TestCase):
+    """Aucune page ne doit laisser fuir de la syntaxe de gabarit.
+
+    Ce test existe à cause d'un bug signalé en séance : `{# ... #}` est un
+    commentaire **monoligne** en Django. Écrit sur deux lignes, ce n'est plus
+    un commentaire — c'est du texte, affiché tel quel, et une fois par tour de
+    boucle quand il se trouve dans un {% for %}. La page Documents affichait
+    ainsi trente-trois fois le même paragraphe de commentaire.
+
+    Rien ne lève d'erreur dans ce cas : Django rend ce qu'il ne comprend pas
+    comme du texte ordinaire. Seul un test qui regarde le HTML produit peut
+    s'en apercevoir — et il couvre d'un coup toutes les variantes de la même
+    faute : une balise mal orthographiée, un {% if %} jamais fermé repris en
+    texte, un {{ variable }} laissé dans un attribut non interprété.
+    """
+
+    # Toute séquence d'ouverture de la syntaxe de gabarit. Si l'une d'elles
+    # survit au rendu, c'est que Django ne l'a pas reconnue.
+    MARQUEURS = ("{#", "#}", "{%", "%}", "{{", "}}")
+
+    @classmethod
+    def setUpTestData(cls):
+        """Quelques lignes dans chaque liste : le bug n'apparaît qu'en boucle."""
+        from datetime import timedelta
+        from decimal import Decimal
+
+        from django.utils import timezone
+
+        from fleet.models import Document, Entretien, Mission, PleinCarburant
+
+        aujourdhui = timezone.localdate()
+        cls.vehicule = creer_vehicule(immatriculation="SY 1234 RB")
+        cls.chauffeur = creer_chauffeur()
+
+        for index in range(3):
+            Mission.objects.create(
+                vehicule=cls.vehicule,
+                chauffeur=cls.chauffeur,
+                depart="Cotonou",
+                destination=f"Ville {index}",
+                date_depart=aujourdhui - timedelta(days=index + 1),
+                date_arrivee=aujourdhui - timedelta(days=index + 1),
+                km_depart=1_000 + index * 100,
+                km_arrivee=1_050 + index * 100,
+                statut=Mission.Statut.TERMINEE,
+            )
+            Document.objects.create(
+                vehicule=cls.vehicule,
+                type_document=Document.TypeDocument.ASSURANCE,
+                numero=f"POL-{index}",
+                date_expiration=aujourdhui + timedelta(days=100 + index),
+            )
+            PleinCarburant.objects.create(
+                vehicule=cls.vehicule,
+                chauffeur=cls.chauffeur,
+                date=aujourdhui - timedelta(days=index + 1),
+                litres=Decimal("40"),
+                prix_litre=Decimal("715"),
+                km_compteur=10_000 + index * 500,
+            )
+            Entretien.objects.create(
+                vehicule=cls.vehicule,
+                type_entretien=Entretien.TypeEntretien.VIDANGE,
+                date=aujourdhui - timedelta(days=index + 1),
+                km=5_000 + index * 100,
+                cout=Decimal("30000"),
+                prestataire="Garage Akpakpa",
+                prochaine_echeance_km=10_000 + index * 100,
+            )
+
+    def setUp(self):
+        self.utilisateur = get_user_model().objects.create_user(
+            username="gestionnaire"
+        )
+        self.client.force_login(self.utilisateur)
+
+    def adresses(self):
+        return [
+            reverse("fleet:vehicule_liste"),
+            reverse("fleet:vehicule_detail", args=[self.vehicule.pk]),
+            reverse("fleet:vehicule_creer"),
+            reverse("fleet:vehicule_modifier", args=[self.vehicule.pk]),
+            reverse("fleet:chauffeur_liste"),
+            reverse("fleet:chauffeur_detail", args=[self.chauffeur.pk]),
+            reverse("fleet:chauffeur_creer"),
+            reverse("fleet:mission_liste"),
+            reverse("fleet:mission_creer"),
+            reverse("fleet:plein_liste"),
+            reverse("fleet:plein_creer"),
+            reverse("fleet:entretien_liste"),
+            reverse("fleet:entretien_creer"),
+            reverse("fleet:document_liste"),
+            reverse("fleet:alerte_liste"),
+            reverse("fleet:alerte_bandeau"),
+        ]
+
+    def test_aucune_syntaxe_de_gabarit_dans_les_pages(self):
+        for adresse in self.adresses():
+            reponse = self.client.get(adresse)
+            self.assertEqual(reponse.status_code, 200)
+            contenu = reponse.content.decode("utf-8")
+            for marqueur in self.MARQUEURS:
+                with self.subTest(adresse=adresse, marqueur=marqueur):
+                    self.assertNotIn(marqueur, contenu)
+
+    def test_la_page_de_connexion_aussi(self):
+        self.client.logout()
+        contenu = self.client.get(reverse("login")).content.decode("utf-8")
+        for marqueur in self.MARQUEURS:
+            with self.subTest(marqueur=marqueur):
+                self.assertNotIn(marqueur, contenu)
+
+    def test_les_formulaires_reaffiches_apres_erreur_aussi(self):
+        """Le chemin le moins emprunté est celui où un commentaire se cache."""
+        reponse = self.client.post(
+            reverse("fleet:vehicule_creer"),
+            {"immatriculation": "SY 1234 RB", "marque": "", "annee": "pas-un-nombre"},
+        )
+        self.assertEqual(reponse.status_code, 200)
+        contenu = reponse.content.decode("utf-8")
+        for marqueur in self.MARQUEURS:
+            with self.subTest(marqueur=marqueur):
+                self.assertNotIn(marqueur, contenu)

@@ -69,8 +69,10 @@
           <td>{{ plein.chauffeur.nom }}</td>
           <td class="ff-droite ff-chiffre">{{ plein.litres }}</td>
           <td class="ff-droite ff-chiffre">{{ plein.prix_litre|floatformat:0 }}</td>
-          {# cout_total est une propriété du modèle : aucun calcul ici, et la
-             multiplication reste en Decimal. #}
+          {% comment %}
+            cout_total est une propriété du modèle : aucun calcul ici, et la
+            multiplication reste en Decimal.
+          {% endcomment %}
           <td class="ff-droite ff-chiffre">{{ plein.cout_total|floatformat:0|intcomma }} F</td>
           <td class="ff-droite ff-chiffre">{{ plein.km_compteur|intcomma }}</td>
           <td class="ff-droite">

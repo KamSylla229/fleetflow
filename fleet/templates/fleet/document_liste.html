@@ -89,8 +89,10 @@
           <td class="ff-chiffre">{{ document.numero|default:"—" }}</td>
           <td class="ff-chiffre">{{ document.date_emission|date:"d/m/Y"|default:"—" }}</td>
           <td class="ff-chiffre">{{ document.date_expiration|date:"d/m/Y"|default:"—" }}</td>
-          {# Vert, ambre ou rouge selon statut_echeance() ; neutre pour une
-             pièce sans date d'expiration, comme une carte grise. #}
+          {% comment %}
+            Vert, ambre ou rouge selon statut_echeance() ; neutre pour une
+            pièce sans date d'expiration, comme une carte grise.
+          {% endcomment %}
           <td>{% include "partials/_badge.html" with statut=document.statut only %}</td>
         </tr>
       {% empty %}
