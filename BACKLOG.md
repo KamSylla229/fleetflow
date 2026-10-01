@@ -4,7 +4,7 @@ Tout ce qui a été écarté du périmètre, avec la raison. Rien n'est ici « p
 plus tard » sans motif : un backlog qui ne dit pas pourquoi une idée a été
 repoussée finit par être relu comme une liste de manques.
 
-Dernière mise à jour : 30/09/2026 (fin du Jour 3).
+Dernière mise à jour : 01/10/2026 (fin de la phase A — thème).
 
 ---
 
@@ -120,15 +120,37 @@ est de décider qui peut quoi, pas de l'implémenter.
 
 ## 3. Dette technique et confort
 
-### Bootstrap servi depuis un CDN
-`base.html` charge Bootstrap depuis `cdn.jsdelivr.net`. Sans connexion, l'appli
-s'affiche sans style. À rapatrier dans `static/` avant un déploiement chez un
-client dont la connexion est intermittente — ce qui est le cas courant.
+### ~~Bootstrap servi depuis un CDN~~ — fait le 01/10/2026
+Bootstrap, Bootstrap Icons, Instrument Sans et IBM Plex Mono sont rapatriés dans
+`static/vendor/` (840 ko). Un test (`RessourcesLocalesTest`) interdit désormais
+toute référence à un CDN dans les pages et vérifie que chaque fichier existe sur
+le disque : c'est le genre de régression qu'on ne voit qu'une fois la connexion
+coupée, donc chez le client.
 
-### Séparateurs de milliers
-`412000 km` se lit mal ; `412 000 km` se lit. `django.contrib.humanize` fournit
-`intcomma`, mais son séparateur suit la locale et mérite une vérification en
-`fr-fr` avant d'être appliqué partout.
+### ~~Séparateurs de milliers~~ — fait le 01/10/2026
+`django.contrib.humanize` est activé (il fait partie de Django, ce n'est pas une
+dépendance nouvelle) et `intcomma` sépare les milliers par une espace insécable
+(U+00A0) en locale `fr-fr` — vérifié avant application. Tous les kilométrages et
+les montants passent par ce filtre.
+
+### `collectstatic` et service des fichiers statiques en production
+En développement, `django.contrib.staticfiles` sert `static/` tout seul. En
+production il faudra un `collectstatic` et un serveur de fichiers (Nginx, ou
+WhiteNoise si on accepte une dépendance de plus). Tant que l'application tourne
+en `runserver`, rien à faire.
+
+### Les captures de la maquette ne sont pas versionnées
+Le thème a été construit d'après sept captures d'écran fournies en séance, mais
+`docs/maquette/` n'existe pas dans le dépôt. La référence visuelle du projet
+n'est donc nulle part : à committer pour que la prochaine personne puisse
+comparer. Les commentaires du thème et des gabarits y renvoient déjà par ce
+chemin.
+
+### Deux entrées de menu passent sur deux lignes
+« Tableau de bord » et « Fournisseurs GPS » accompagnés de leur pastille
+« bientôt » dépassent les 222 px de la barre latérale. Sans gravité, et le
+problème disparaît de lui-même quand la page existe : la pastille s'en va. À
+reprendre seulement si une entrée longue reste durablement désactivée.
 
 ### Pas de mise en cache
 Chaque page recalcule tout. Inutile à cette échelle, à surveiller le jour où un
