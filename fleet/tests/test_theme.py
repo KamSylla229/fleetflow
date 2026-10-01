@@ -212,3 +212,158 @@ class InitialesTest(TestCase):
 
     def test_aucun_utilisateur(self):
         self.assertEqual(initiales(None), "")
+
+
+class PaginationTest(TestCase):
+    """Toutes les listes doivent supporter d'avoir plus d'une page.
+
+    Ce test existe à cause d'une erreur 500 signalée en séance sur /missions/
+    et /documents/. Le gabarit de pagination appelait
+    `page_obj.previous_page_number` sur la première page, où cette méthode
+    lève une EmptyPage au lieu de renvoyer None.
+
+    Aucun test ne l'avait vu, et la raison est instructive : tous les jeux de
+    données de test tiennent sur une seule page, or le bloc de pagination
+    n'est rendu qu'à partir de deux. **Un composant qui ne s'affiche que dans
+    un cas limite doit être testé dans ce cas limite**, pas dans le cas
+    ordinaire.
+
+    On crée donc volontairement plus d'objets que la taille d'une page (25).
+    """
+
+    PAR_PAGE = 26
+
+    @classmethod
+    def setUpTestData(cls):
+        """Les données sont créées une fois pour toute la classe.
+
+        setUpTestData et non setUp : créer cent trente objets à chaque test
+        serait trois fois plus lent pour un jeu de données que personne ne
+        modifie.
+        """
+        from datetime import timedelta
+        from decimal import Decimal
+
+        from django.utils import timezone
+
+        from fleet.models import Document, Entretien, Mission, PleinCarburant
+
+        aujourdhui = timezone.localdate()
+
+        cls.vehicules = [
+            creer_vehicule(immatriculation=f"PA {1000 + index} RB")
+            for index in range(cls.PAR_PAGE)
+        ]
+        cls.chauffeurs = [
+            creer_chauffeur(nom=f"Chauffeur {index}", permis=f"BJ-PA-{index}")
+            for index in range(cls.PAR_PAGE)
+        ]
+        vehicule = cls.vehicules[0]
+        chauffeur = cls.chauffeurs[0]
+
+        Mission.objects.bulk_create(
+            Mission(
+                vehicule=vehicule,
+                chauffeur=chauffeur,
+                depart="Cotonou",
+                destination=f"Ville {index}",
+                date_depart=aujourdhui - timedelta(days=index + 1),
+                date_arrivee=aujourdhui - timedelta(days=index + 1),
+                km_depart=1_000 + index * 100,
+                km_arrivee=1_050 + index * 100,
+                statut=Mission.Statut.TERMINEE,
+            )
+            for index in range(cls.PAR_PAGE)
+        )
+        Document.objects.bulk_create(
+            Document(
+                vehicule=vehicule,
+                type_document=Document.TypeDocument.AUTRE,
+                numero=f"DOC-{index}",
+                date_expiration=aujourdhui + timedelta(days=index + 1),
+            )
+            for index in range(cls.PAR_PAGE)
+        )
+        PleinCarburant.objects.bulk_create(
+            PleinCarburant(
+                vehicule=vehicule,
+                chauffeur=chauffeur,
+                date=aujourdhui - timedelta(days=index + 1),
+                litres=Decimal("40"),
+                prix_litre=Decimal("715"),
+                km_compteur=10_000 + index * 500,
+            )
+            for index in range(cls.PAR_PAGE)
+        )
+        Entretien.objects.bulk_create(
+            Entretien(
+                vehicule=vehicule,
+                type_entretien=Entretien.TypeEntretien.VIDANGE,
+                date=aujourdhui - timedelta(days=index + 1),
+                km=5_000 + index * 100,
+                cout=Decimal("30000"),
+                prestataire="Garage Akpakpa",
+            )
+            for index in range(cls.PAR_PAGE)
+        )
+
+    def setUp(self):
+        self.utilisateur = get_user_model().objects.create_user(
+            username="gestionnaire"
+        )
+        self.client.force_login(self.utilisateur)
+
+    def listes(self):
+        return [
+            "fleet:vehicule_liste",
+            "fleet:chauffeur_liste",
+            "fleet:mission_liste",
+            "fleet:plein_liste",
+            "fleet:entretien_liste",
+            "fleet:document_liste",
+        ]
+
+    def test_la_premiere_page_s_affiche(self):
+        """C'est précisément le cas qui levait une EmptyPage."""
+        for nom in self.listes():
+            with self.subTest(vue=nom):
+                reponse = self.client.get(reverse(nom))
+                self.assertEqual(reponse.status_code, 200)
+                self.assertContains(reponse, "ff-pagination")
+                self.assertGreater(reponse.context["page_obj"].paginator.num_pages, 1)
+
+    def test_la_deuxieme_page_s_affiche(self):
+        for nom in self.listes():
+            with self.subTest(vue=nom):
+                reponse = self.client.get(reverse(nom), {"page": "2"})
+                self.assertEqual(reponse.status_code, 200)
+                self.assertEqual(reponse.context["page_obj"].number, 2)
+
+    def test_les_boutons_sont_desactives_aux_extremites(self):
+        """Pas de lien mort : un <span> grisé, et aucun href à suivre."""
+        reponse = self.client.get(reverse("fleet:document_liste"))
+        self.assertContains(reponse, '<span class="page-link">Précédent</span>')
+
+        derniere = reponse.context["page_obj"].paginator.num_pages
+        reponse = self.client.get(
+            reverse("fleet:document_liste"), {"page": str(derniere)}
+        )
+        self.assertContains(reponse, '<span class="page-link">Suivant</span>')
+
+    def test_les_filtres_survivent_au_changement_de_page(self):
+        reponse = self.client.get(
+            reverse("fleet:document_liste"), {"type": "autre", "page": "2"}
+        )
+        self.assertEqual(reponse.status_code, 200)
+        self.assertEqual(reponse.context["parametres_filtres"], "type=autre")
+        # Le lien « Précédent » doit reconduire le filtre.
+        self.assertContains(reponse, "page=1&amp;type=autre")
+
+    def test_un_numero_de_page_absurde_renvoie_404(self):
+        """Et non une erreur 500 : une adresse bricolée n'est pas un bug."""
+        for page in ("0", "999", "abc", "-1"):
+            with self.subTest(page=page):
+                reponse = self.client.get(
+                    reverse("fleet:document_liste"), {"page": page}
+                )
+                self.assertEqual(reponse.status_code, 404)

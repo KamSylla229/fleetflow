@@ -6,6 +6,14 @@
   C'est ce second élément qui fait tout l'intérêt du fichier : sans lui,
   passer à la page 2 d'une recherche afficherait la page 2 de la liste
   complète.
+
+  **Piège corrigé le 01/10/2026.** page_obj.previous_page_number lève une
+  EmptyPage quand on est sur la première page — ce n'est pas une propriété qui
+  renvoie None, c'est une méthode qui refuse. L'ancienne version l'appelait
+  dans tous les cas en se contentant de griser le bouton, ce qui faisait
+  planter en erreur 500 **toute liste dépassant une page**. Les tests ne le
+  voyaient pas : leurs jeux de données tiennent sur une seule page, et le bloc
+  entier n'est alors jamais rendu.
 {% endcomment %}
 {% if page_obj.paginator.num_pages > 1 %}
   <nav class="ff-pagination" aria-label="Pagination">
@@ -14,12 +22,19 @@
       {{ page_obj.paginator.count }} résultat{{ page_obj.paginator.count|pluralize }}
     </p>
     <ul class="pagination pagination-sm">
-      <li class="page-item{% if not page_obj.has_previous %} disabled{% endif %}">
-        <a class="page-link"
-           href="?page={{ page_obj.previous_page_number }}{% if parametres_filtres %}&amp;{{ parametres_filtres }}{% endif %}">
-          Précédent
-        </a>
-      </li>
+
+      {% if page_obj.has_previous %}
+        <li class="page-item">
+          <a class="page-link"
+             href="?page={{ page_obj.previous_page_number }}{% if parametres_filtres %}&amp;{{ parametres_filtres }}{% endif %}">
+            Précédent
+          </a>
+        </li>
+      {% else %}
+        {# Un <span> et non un lien mort : rien à suivre, rien à atteindre au clavier. #}
+        <li class="page-item disabled"><span class="page-link">Précédent</span></li>
+      {% endif %}
+
       {% for numero in page_obj.paginator.page_range %}
         {% if numero == page_obj.number %}
           <li class="page-item active"><span class="page-link">{{ numero }}</span></li>
@@ -32,12 +47,18 @@
           </li>
         {% endif %}
       {% endfor %}
-      <li class="page-item{% if not page_obj.has_next %} disabled{% endif %}">
-        <a class="page-link"
-           href="?page={{ page_obj.next_page_number }}{% if parametres_filtres %}&amp;{{ parametres_filtres }}{% endif %}">
-          Suivant
-        </a>
-      </li>
+
+      {% if page_obj.has_next %}
+        <li class="page-item">
+          <a class="page-link"
+             href="?page={{ page_obj.next_page_number }}{% if parametres_filtres %}&amp;{{ parametres_filtres }}{% endif %}">
+            Suivant
+          </a>
+        </li>
+      {% else %}
+        <li class="page-item disabled"><span class="page-link">Suivant</span></li>
+      {% endif %}
+
     </ul>
   </nav>
 {% endif %}
