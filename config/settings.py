@@ -112,6 +112,15 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 
+# Suivi GPS
+# --------------------------------------------------------------------------
+
+# Duree, en minutes, au-dela de laquelle un boitier qui ne remonte plus rien
+# est declare « sans signal ». Reglable par l'environnement : la demonstration
+# l'abaisse a 1 pour qu'on n'attende pas une demi-heure devant l'ecran.
+FLEETFLOW_SEUIL_SANS_SIGNAL_MIN = env.int("FLEETFLOW_SEUIL_SANS_SIGNAL_MIN", default=30)
+
+
 # Messages
 # https://docs.djangoproject.com/en/5.2/ref/contrib/messages/
 

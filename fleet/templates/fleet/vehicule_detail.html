@@ -3,8 +3,7 @@
 
 {% comment %}
   La fiche d'un camion : son état, ses pièces administratives et son activité
-  récente. Le bloc « Dernière position » viendra se glisser dans la colonne de
-  droite quand le modèle PositionGPS existera.
+  récente, dont le dernier relevé de son boîtier GPS.
 {% endcomment %}
 
 {% block titre %}{{ vehicule.immatriculation }} — FleetFlow{% endblock %}
@@ -139,6 +138,72 @@
 </div>
 
 <div class="ff-pile mt-4">
+
+  <div class="ff-carte">
+    <div class="ff-carte__entete">
+      <h2 class="ff-carte__titre">Suivi GPS</h2>
+      {% include "partials/_badge.html" with statut=statut_gps only %}
+    </div>
+    <div class="ff-carte__corps">
+      {% if derniere_position %}
+        <dl class="ff-donnees">
+          <div class="ff-donnees__ligne">
+            <dt class="ff-donnees__cle">Dernière position connue</dt>
+            <dd class="ff-donnees__valeur ff-chiffre">
+              {{ derniere_position.latitude }}, {{ derniere_position.longitude }}
+            </dd>
+          </div>
+          <div class="ff-donnees__ligne">
+            <dt class="ff-donnees__cle">Relevé</dt>
+            <dd class="ff-donnees__valeur">
+              {# timesince est un filtre fourni par Django : « 3 heures, 40 minutes ». #}
+              il y a {{ derniere_position.horodatage|timesince }}
+              <span class="ff-sous-ligne ff-chiffre">
+                {{ derniere_position.horodatage|date:"d/m/Y H:i" }}
+              </span>
+            </dd>
+          </div>
+          <div class="ff-donnees__ligne">
+            <dt class="ff-donnees__cle">Vitesse</dt>
+            <dd class="ff-donnees__valeur ff-chiffre">
+              {{ derniere_position.vitesse_kmh }} km/h
+            </dd>
+          </div>
+          <div class="ff-donnees__ligne">
+            <dt class="ff-donnees__cle">Boîtier</dt>
+            <dd class="ff-donnees__valeur">
+              {% if vehicule.fournisseur_gps %}
+                {{ vehicule.fournisseur_gps.nom }}
+                <span class="ff-sous-ligne ff-chiffre">{{ vehicule.boitier_id }}</span>
+              {% else %}
+                <span class="text-body-tertiary">non équipé</span>
+              {% endif %}
+            </dd>
+          </div>
+          <div class="ff-donnees__ligne">
+            <dt class="ff-donnees__cle">Itinéraire simulé</dt>
+            <dd class="ff-donnees__valeur">
+              {{ vehicule.get_itineraire_display|default:"—" }}
+              {% if vehicule.trace %}
+                <span class="ff-sous-ligne ff-chiffre">
+                  {{ vehicule.progression_pourcent }} % parcouru
+                </span>
+              {% endif %}
+            </dd>
+          </div>
+        </dl>
+      {% else %}
+        <p class="text-body-secondary mb-0">
+          Aucun relevé pour ce camion.
+          {% if vehicule.fournisseur_gps %}
+            Son boîtier {{ vehicule.boitier_id }} n'a encore rien remonté.
+          {% else %}
+            Il n'est pas équipé d'un boîtier.
+          {% endif %}
+        </p>
+      {% endif %}
+    </div>
+  </div>
 
   <div class="ff-carte">
     <div class="ff-carte__entete">

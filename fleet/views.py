@@ -91,7 +91,15 @@ class VehiculeListView(ListeFiltrableView):
         # inverse (plusieurs documents par véhicule), que select_related ne
         # sait pas charger. Sans cela, les badges d'échéance déclencheraient
         # une requête par ligne affichée.
-        queryset = Vehicule.objects.prefetch_related("documents")
+        #
+        # annoter_dernieres_positions ajoute le dernier relevé GPS de chaque
+        # camion par sous-requêtes corrélées : le statut GPS de la colonne ne
+        # coûte alors aucune requête supplémentaire.
+        queryset = services.annoter_dernieres_positions(
+            Vehicule.objects.select_related("fournisseur_gps").prefetch_related(
+                "documents"
+            )
+        )
 
         recherche = self.request.GET.get("q", "").strip()
         if recherche:
@@ -128,9 +136,14 @@ class VehiculeListView(ListeFiltrableView):
         # Le statut est calculé ici, une fois par ligne, et attaché à l'objet.
         # Un gabarit Django ne peut pas appeler une fonction avec un argument :
         # c'est à la vue de préparer ce qu'il affichera.
+        maintenant = timezone.now()
         for vehicule in vehicules:
             vehicule.statut_assurance = services.statut_assurance(vehicule)
             vehicule.statut_operationnel = services.statut_operationnel(vehicule)
+            # Le même instant pour toute la page : sinon deux camions au même
+            # état pourraient être qualifiés différemment selon la
+            # milliseconde à laquelle leur ligne a été calculée.
+            vehicule.statut_gps = services.statut_gps(vehicule, maintenant=maintenant)
             vehicule.mission_en_cours = missions.get(vehicule.pk)
         contexte["vehicules"] = vehicules
 
@@ -170,6 +183,8 @@ class VehiculeDetailView(LoginRequiredMixin, DetailView):
 
         contexte["documents"] = services.documents_avec_statut(vehicule)
         contexte["statut_operationnel"] = services.statut_operationnel(vehicule)
+        contexte["statut_gps"] = services.statut_gps(vehicule)
+        contexte["derniere_position"] = services.derniere_position(vehicule)
         contexte["statut_assurance"] = services.statut_assurance(vehicule)
         contexte["statut_visite"] = services.statut_visite_technique(vehicule)
         # La mission en cours donne le chauffeur actuellement affecté : aucun

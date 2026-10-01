@@ -35,14 +35,26 @@ jour où la base passera sur PostgreSQL, et la protection n'est pas illusoire
 en attendant : SQLite sérialise les écritures.
 """
 
+import random
 from dataclasses import dataclass
+from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
+from django.db.models import OuterRef, Subquery
 from django.utils import timezone
 
-from .models import Chauffeur, Entretien, Mission, PleinCarburant, Vehicule
+from .models import (
+    Chauffeur,
+    Entretien,
+    FournisseurGPS,
+    Mission,
+    PleinCarburant,
+    PositionGPS,
+    Vehicule,
+)
 
 # --- Réglages métier ---------------------------------------------------------
 # Les seuils sont des constantes nommées, pas des nombres écrits au milieu du
@@ -1021,3 +1033,245 @@ def statut_mission(mission):
         libelle=mission.get_statut_display(),
         ton=TONS_STATUT_MISSION.get(mission.statut, "neutre"),
     )
+
+
+# --- Suivi GPS ---------------------------------------------------------------
+# Deux notions à ne pas confondre :
+#   - le statut *opérationnel* (disponible, en mission, en maintenance) est
+#     saisi par le gestionnaire et vaut pour la flotte ;
+#   - le statut *GPS* (en route, à l'arrêt, sans signal) est **calculé** à
+#     partir du dernier relevé du boîtier. Personne ne le saisit, et il peut
+#     contredire le premier — c'est précisément à ça qu'il sert.
+
+GPS_EN_ROUTE = "en_route"
+GPS_A_ARRET = "a_arret"
+GPS_SANS_SIGNAL = "sans_signal"
+GPS_AUCUNE_DONNEE = "aucune_donnee"
+
+TONS_STATUT_GPS = {
+    GPS_EN_ROUTE: "vert",
+    GPS_A_ARRET: "ambre",
+    GPS_SANS_SIGNAL: "rouge",
+    GPS_AUCUNE_DONNEE: "neutre",
+}
+
+LIBELLES_STATUT_GPS = {
+    GPS_EN_ROUTE: "En route",
+    GPS_A_ARRET: "À l'arrêt",
+    GPS_SANS_SIGNAL: "Sans signal",
+    GPS_AUCUNE_DONNEE: "Aucune donnée",
+}
+
+# Une vitesse tirée à ±15 % de la nominale, et une chance sur vingt d'être
+# arrêté à un relevé donné : feu rouge, pesage, pause. Une simulation trop
+# régulière se repère au premier coup d'œil et ne met à l'épreuve aucun des
+# cas que l'application devra traiter.
+VARIATION_VITESSE = 0.15
+PROBABILITE_ARRET = 0.05
+
+
+def seuil_sans_signal():
+    """Durée au-delà de laquelle un boîtier est considéré muet.
+
+    Lue dans les réglages à chaque appel et non figée à l'import : la
+    démonstration abaisse le seuil à une minute dans le `.env` pour qu'on
+    n'attende pas une demi-heure devant l'écran.
+    """
+    return timedelta(minutes=settings.FLEETFLOW_SEUIL_SANS_SIGNAL_MIN)
+
+
+def derniere_position(vehicule):
+    """Le relevé le plus récent de ce camion, ou None s'il n'y en a aucun.
+
+    `Meta.ordering` de PositionGPS trie déjà du plus récent au plus ancien,
+    et l'index composé (vehicule, -horodatage) rend cette requête immédiate
+    même sur une table de plusieurs centaines de milliers de lignes.
+    """
+    return vehicule.positions.first()
+
+
+def annoter_dernieres_positions(queryset):
+    """Ajoute le dernier relevé de chaque camion, en une seule requête.
+
+    Quatre sous-requêtes corrélées (une par colonne utile) exécutées dans la
+    même requête que la liste. L'alternative — appeler derniere_position()
+    dans la boucle du gabarit — coûterait une requête par ligne.
+
+    OuterRef("pk") désigne le camion de la ligne en cours côté requête
+    extérieure : c'est ce qui rend la sous-requête corrélée. Le `[:1]` est
+    obligatoire, une sous-requête de colonne devant renvoyer une seule ligne.
+    """
+    derniere = PositionGPS.objects.filter(vehicule=OuterRef("pk")).order_by(
+        "-horodatage", "-pk"
+    )
+    return queryset.annotate(
+        gps_horodatage=Subquery(derniere.values("horodatage")[:1]),
+        gps_vitesse_kmh=Subquery(derniere.values("vitesse_kmh")[:1]),
+        gps_latitude=Subquery(derniere.values("latitude")[:1]),
+        gps_longitude=Subquery(derniere.values("longitude")[:1]),
+    )
+
+
+def statut_gps(vehicule, maintenant=None):
+    """Qualifie l'état GPS d'un camion d'après son dernier relevé.
+
+    Quatre réponses possibles :
+      - aucune_donnee : jamais rien reçu (pas de boîtier, ou boîtier neuf) ;
+      - sans_signal   : le dernier relevé est plus vieux que le seuil ;
+      - en_route      : relevé récent, vitesse non nulle ;
+      - a_arret       : relevé récent, vitesse nulle.
+
+    « Jamais rien reçu » et « plus rien depuis trois heures » sont distingués
+    à dessein : le premier est un camion non équipé, le second une panne.
+
+    Si le camion a été annoté par annoter_dernieres_positions(), les valeurs
+    annotées sont utilisées et aucune requête n'est faite.
+    """
+    maintenant = maintenant or timezone.now()
+
+    horodatage = getattr(vehicule, "gps_horodatage", _NON_FOURNI)
+    if horodatage is _NON_FOURNI:
+        position = derniere_position(vehicule)
+        horodatage = position.horodatage if position is not None else None
+        vitesse = position.vitesse_kmh if position is not None else None
+    else:
+        vitesse = getattr(vehicule, "gps_vitesse_kmh", None)
+
+    if horodatage is None:
+        code = GPS_AUCUNE_DONNEE
+    elif maintenant - horodatage > seuil_sans_signal():
+        # Comparaison stricte : un relevé pile à l'âge du seuil est encore
+        # considéré comme reçu. La borne doit être décidée, pas subie.
+        code = GPS_SANS_SIGNAL
+    elif vitesse is not None and vitesse > 0:
+        code = GPS_EN_ROUTE
+    else:
+        code = GPS_A_ARRET
+
+    return StatutAffichable(
+        code=code,
+        libelle=LIBELLES_STATUT_GPS[code],
+        ton=TONS_STATUT_GPS[code],
+    )
+
+
+@transaction.atomic
+def basculer_signal(vehicule, *, coupe):
+    """Coupe ou rétablit le signal d'un boîtier (interrupteur de démonstration).
+
+    Passe par un service et non par une écriture directe pour la même raison
+    que tout le reste : la commande `simuler_positions --couper` et un futur
+    bouton dans l'interface doivent faire exactement la même chose.
+    """
+    vehicule = Vehicule.objects.select_for_update().get(pk=vehicule.pk)
+    vehicule.signal_coupe = coupe
+    vehicule.save(update_fields=["signal_coupe"])
+    return vehicule
+
+
+@transaction.atomic
+def avancer_position(vehicule, dt_secondes, rng=None, maintenant=None):
+    """Fait avancer un camion sur son itinéraire et enregistre sa position.
+
+    **Point d'entrée unique de la simulation.** Renvoie la PositionGPS créée,
+    ou None si le camion n'avait pas à bouger — et dans ce cas rien n'est
+    écrit du tout.
+
+    Trois conditions pour qu'un relevé soit produit :
+      - le camion a un itinéraire ;
+      - il est engagé sur une mission en cours (un camion au dépôt ne remonte
+        pas de trajet) ;
+      - son signal n'est pas coupé.
+
+    `rng` permet d'injecter un générateur aléatoire — `random.Random(42)` dans
+    les tests. Sans cela, un test sur la distance parcourue réussirait ou
+    échouerait selon le tirage, ce qui est la définition d'un test inutile.
+    """
+    if dt_secondes <= 0:
+        raise ValidationError(
+            "La durée écoulée doit être strictement positive pour faire "
+            "avancer un camion."
+        )
+
+    rng = rng or random
+    maintenant = maintenant or timezone.now()
+
+    # Rechargement sous verrou : deux ticks qui se chevauchent — une boucle
+    # lancée deux fois par distraction — ne doivent pas faire avancer le même
+    # camion en parallèle depuis la même progression.
+    vehicule = Vehicule.objects.select_for_update().get(pk=vehicule.pk)
+
+    trace = vehicule.trace
+    if trace is None or vehicule.signal_coupe:
+        return None
+    if not missions_en_cours(vehicule=vehicule).exists():
+        return None
+
+    if rng.random() < PROBABILITE_ARRET:
+        vitesse_kmh = 0.0
+        distance_km = 0.0
+    else:
+        facteur = 1 + rng.uniform(-VARIATION_VITESSE, VARIATION_VITESSE)
+        vitesse_kmh = vehicule.vitesse_nominale_kmh * facteur
+        distance_km = vitesse_kmh * dt_secondes / 3600
+
+    # La progression avance de la fraction de l'itinéraire parcourue. C'est la
+    # longueur *routière* qui sert ici : un camion à 60 km/h couvre 60 km de
+    # route en une heure, pas 60 km à vol d'oiseau.
+    progression = vehicule.progression + vehicule.direction * (
+        distance_km / trace.longueur_km
+    )
+    direction = vehicule.direction
+
+    # Aller-retour : arrivé au bout, le camion repart dans l'autre sens. Les
+    # bornes sont posées à 1 et 0 plutôt que laissées déborder, sinon un tick
+    # un peu long enverrait la progression à 1,04 et le marqueur hors du tracé.
+    if progression >= 1:
+        progression = 1.0
+        direction = -1
+    elif progression <= 0:
+        progression = 0.0
+        direction = 1
+
+    latitude, longitude = trace.point_a(progression)
+
+    position = PositionGPS.objects.create(
+        vehicule=vehicule,
+        latitude=Decimal(str(round(latitude, 6))),
+        longitude=Decimal(str(round(longitude, 6))),
+        vitesse_kmh=Decimal(str(round(vitesse_kmh, 1))),
+        horodatage=maintenant,
+        source=PositionGPS.Source.SIMULATION,
+    )
+
+    vehicule.progression = progression
+    vehicule.direction = direction
+    vehicule.save(update_fields=["progression", "direction"])
+
+    if vehicule.fournisseur_gps_id:
+        # .update() plutôt que de charger l'objet : une seule requête, et pas
+        # de risque d'écraser au passage un autre champ du fournisseur qu'un
+        # tick voisin viendrait de modifier.
+        FournisseurGPS.objects.filter(pk=vehicule.fournisseur_gps_id).update(
+            dernier_echange=position.horodatage
+        )
+
+    return position
+
+
+def avancer_flotte(dt_secondes, rng=None, maintenant=None):
+    """Un tick de simulation pour toute la flotte active.
+
+    Renvoie la liste des couples (camion, position ou None). La boucle vit ici
+    et non dans la commande : un futur travail planifié, ou un bouton
+    « avancer » dans l'interface, doivent avancer la flotte exactement de la
+    même façon.
+    """
+    resultats = []
+    for vehicule in Vehicule.objects.filter(actif=True).select_related(
+        "fournisseur_gps"
+    ):
+        resultats.append(
+            (vehicule, avancer_position(vehicule, dt_secondes, rng=rng, maintenant=maintenant))
+        )
+    return resultats

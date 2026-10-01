@@ -27,12 +27,16 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
+from fleet import services
+from fleet.itineraires import ITINERAIRES
 from fleet.models import (
     Chauffeur,
     Document,
     Entretien,
+    FournisseurGPS,
     Mission,
     PleinCarburant,
+    PositionGPS,
     Vehicule,
 )
 
@@ -119,6 +123,35 @@ CARBURANT_REFERENCE = {
     Vehicule.TypeVehicule.MOTO: (Decimal("3"), 200),
 }
 
+# (nom, statut de raccordement, fréquence d'interrogation en secondes)
+# Deux fournisseurs, dans deux états différents : c'est la situation réelle
+# d'une PME qui raccorde sa flotte progressivement.
+FOURNISSEURS_GPS = [
+    ("Cartrack", FournisseurGPS.StatutConnexion.CONNECTE, 30),
+    ("Orange Fleet", FournisseurGPS.StatutConnexion.EN_ATTENTE, 60),
+]
+
+# Vitesse de croisière par type de véhicule, en km/h.
+VITESSES_NOMINALES = {
+    Vehicule.TypeVehicule.CAMION: 60,
+    Vehicule.TypeVehicule.UTILITAIRE: 70,
+    Vehicule.TypeVehicule.VOITURE: 80,
+    Vehicule.TypeVehicule.MOTO: 50,
+}
+
+# Les trois camions qui roulent pendant la démonstration, et le chauffeur qui
+# les conduit. Indices dans les listes VEHICULES et CHAUFFEURS.
+MISSIONS_EN_COURS = [
+    (0, 2, "Cotonou", "Parakou"),
+    (1, 1, "Cotonou", "Lokossa"),
+    (4, 3, "Cotonou", "Porto-Novo"),
+]
+
+# Le camion dont le boîtier s'est tu : son dernier relevé datera de 3 h 40,
+# comme dans la maquette. Indice dans VEHICULES.
+VEHICULE_SANS_SIGNAL = 2
+MINUTES_SANS_SIGNAL = 220
+
 # Identifiants du compte de démonstration, créés uniquement quand DEBUG=True.
 DEMO_UTILISATEUR = "demo"
 DEMO_MOT_DE_PASSE = "demo1234"
@@ -156,16 +189,26 @@ class Command(BaseCommand):
         self.aujourdhui = timezone.localdate()
 
         self._vider_donnees()
-        vehicules = self._creer_vehicules()
+        fournisseurs = self._creer_fournisseurs()
+        vehicules = self._creer_vehicules(fournisseurs)
         chauffeurs = self._creer_chauffeurs()
         documents = self._creer_documents(vehicules)
         missions = self._creer_missions(vehicules, chauffeurs)
+        missions += self._creer_missions_en_cours(vehicules, chauffeurs)
+        positions = self._creer_positions(vehicules)
         pleins = self._creer_pleins(vehicules, chauffeurs)
         entretiens = self._creer_entretiens(vehicules)
         utilisateur = self._creer_utilisateur_demo()
 
         self._afficher_resume(
-            vehicules, chauffeurs, documents, missions, pleins, entretiens, utilisateur
+            vehicules,
+            chauffeurs,
+            documents,
+            missions,
+            positions,
+            pleins,
+            entretiens,
+            utilisateur,
         )
 
     # --- Nettoyage -----------------------------------------------------------
@@ -178,33 +221,68 @@ class Command(BaseCommand):
         de supprimer ce véhicule. On efface donc d'abord tout ce qui pointe vers
         Vehicule et Chauffeur, puis seulement ensuite ces deux tables.
         """
+        # PositionGPS est en CASCADE : supprimer les véhicules suffirait. On
+        # l'efface explicitement quand même, pour que l'ordre de ce bloc se
+        # lise comme la liste complète de ce que la commande détruit.
+        PositionGPS.objects.all().delete()
         Mission.objects.all().delete()
         PleinCarburant.objects.all().delete()
         Entretien.objects.all().delete()
         Document.objects.all().delete()
         Vehicule.objects.all().delete()
         Chauffeur.objects.all().delete()
+        FournisseurGPS.objects.all().delete()
         self.stdout.write("Données de démonstration précédentes supprimées.")
 
     # --- Création ------------------------------------------------------------
 
-    def _creer_vehicules(self):
-        """Crée les 10 véhicules.
+    def _creer_fournisseurs(self):
+        """Crée les deux fournisseurs GPS, dans deux états de raccordement."""
+        fournisseurs = [
+            FournisseurGPS.objects.create(
+                nom=nom, statut_connexion=statut, frequence_secondes=frequence
+            )
+            for nom, statut, frequence in FOURNISSEURS_GPS
+        ]
+        self.stdout.write(f"{len(fournisseurs)} fournisseurs GPS créés.")
+        return fournisseurs
+
+    def _creer_vehicules(self, fournisseurs):
+        """Crée les 10 véhicules et les équipe pour la simulation.
 
         Le statut n'est pas tiré au hasard : il doit rester cohérent avec les
         missions créées plus bas, puisque services.creer_mission() refuse
-        d'affecter un véhicule déjà engagé ou en maintenance. Seul le véhicule
-        d'indice 0 portera la mission en cours ; les indices 3 et 7 sont mis en
-        maintenance pour que la démonstration ait de quoi montrer un refus.
+        d'affecter un véhicule déjà engagé ou en maintenance. Les trois
+        véhicules de MISSIONS_EN_COURS portent une mission ; les indices 3 et 7
+        sont mis en maintenance pour que la démonstration ait de quoi montrer
+        un refus.
+
+        Les boîtiers sont répartis volontairement de façon inégale, pour que la
+        démonstration montre les quatre états GPS possibles : les six premiers
+        chez Cartrack, les deux suivants chez Orange Fleet, et les deux motos
+        sans boîtier du tout — elles remonteront « aucune donnée ».
         """
+        en_mission = {indice for indice, _, _, _ in MISSIONS_EN_COURS}
         statuts = {
-            0: Vehicule.Statut.EN_MISSION,
             3: Vehicule.Statut.EN_MAINTENANCE,
             7: Vehicule.Statut.EN_MAINTENANCE,
         }
+        codes_itineraires = list(ITINERAIRES)
         vehicules = []
 
         for index, (marque, modele, type_vehicule, annee, km) in enumerate(VEHICULES):
+            if index < 6:
+                fournisseur = fournisseurs[0]
+            elif index < 8:
+                fournisseur = fournisseurs[1]
+            else:
+                fournisseur = None
+
+            if index in en_mission:
+                statut = Vehicule.Statut.EN_MISSION
+            else:
+                statut = statuts.get(index, Vehicule.Statut.DISPONIBLE)
+
             vehicules.append(
                 Vehicule.objects.create(
                     immatriculation=IMMATRICULATIONS[index],
@@ -213,8 +291,16 @@ class Command(BaseCommand):
                     annee=annee,
                     type_vehicule=type_vehicule,
                     kilometrage=km,
-                    statut=statuts.get(index, Vehicule.Statut.DISPONIBLE),
+                    statut=statut,
                     actif=True,
+                    fournisseur_gps=fournisseur,
+                    boitier_id=(
+                        f"{'CT' if index < 6 else 'OF'}-{88210 + index}"
+                        if fournisseur
+                        else ""
+                    ),
+                    itineraire=codes_itineraires[index % len(codes_itineraires)],
+                    vitesse_nominale_kmh=VITESSES_NOMINALES[type_vehicule],
                 )
             )
 
@@ -329,11 +415,13 @@ class Command(BaseCommand):
     def _creer_missions(self, vehicules, chauffeurs):
         """Crée 25 missions étalées de deux mois en arrière à deux semaines devant.
 
-        Une seule mission se retrouve au statut EN_COURS, celle dont la date de
-        départ tombe aujourd'hui. C'est volontaire : la règle d'engagement du
-        Jour 2 veut qu'un véhicule et un chauffeur ne puissent porter qu'une
-        mission en cours à la fois. Des données de démonstration qui violeraient
-        cette règle rendraient le refus du service incompréhensible.
+        Aucune de ces missions n'est au statut EN_COURS : les missions qui
+        roulent pendant la démonstration sont ouvertes par
+        _creer_missions_en_cours(), qui passe par le service et garantit donc
+        qu'un camion et un chauffeur ne portent qu'une mission en cours à la
+        fois. Avoir deux endroits capables d'ouvrir une mission en cours a
+        d'ailleurs fait échouer le seed, et c'est ce qui a conduit à cette
+        séparation.
         """
         missions = []
 
@@ -356,9 +444,6 @@ class Command(BaseCommand):
 
             if date_depart > self.aujourdhui:
                 statut = Mission.Statut.PLANIFIEE
-            elif date_depart == self.aujourdhui:
-                statut = Mission.Statut.EN_COURS
-                commentaire = "Départ effectué ce matin, retour attendu demain."
             elif index % 8 == 3:
                 statut = Mission.Statut.ANNULEE
                 commentaire = "Annulée : client injoignable au chargement."
@@ -368,8 +453,13 @@ class Command(BaseCommand):
                 # (détours, circulation dans Cotonou).
                 km_parcourus = distance + random.randint(5, 40)
                 km_arrivee = km_depart + km_parcourus
-                date_arrivee = date_depart + timedelta(
-                    days=1 if distance > 200 else 0
+                # min(..., aujourd'hui) : une mission terminée ne peut pas
+                # arriver demain. Sans cette borne, la mission partie ce matin
+                # sur un long trajet se serait vu attribuer une date d'arrivée
+                # dans le futur.
+                date_arrivee = min(
+                    date_depart + timedelta(days=1 if distance > 200 else 0),
+                    self.aujourdhui,
                 )
                 compteurs[vehicule.pk] = km_arrivee
 
@@ -395,6 +485,110 @@ class Command(BaseCommand):
             vehicule.save(update_fields=["kilometrage"])
 
         return missions
+
+    def _creer_missions_en_cours(self, vehicules, chauffeurs):
+        """Ouvre les missions qui roulent pendant la démonstration.
+
+        Elles passent par services.creer_mission() et non par
+        Mission.objects.create() : c'est la seule façon d'être certain que les
+        données de démonstration respectent les règles que l'application
+        applique à l'utilisateur. Si une de ces affectations devenait
+        impossible, le seed échouerait — et ce serait une bonne nouvelle,
+        parce que ça signalerait une incohérence au lieu de la cacher.
+
+        Les couples (camion, chauffeur) de MISSIONS_EN_COURS sont choisis
+        distincts : un camion comme un chauffeur ne peut porter qu'une mission
+        en cours à la fois.
+        """
+        missions = []
+        for indice_vehicule, indice_chauffeur, depart, destination in MISSIONS_EN_COURS:
+            missions.append(
+                services.creer_mission(
+                    vehicule=vehicules[indice_vehicule],
+                    chauffeur=chauffeurs[indice_chauffeur],
+                    depart=depart,
+                    destination=destination,
+                    date_depart=self.aujourdhui,
+                    commentaire="Mission de démonstration, en cours.",
+                )
+            )
+        return missions
+
+    def _creer_positions(self, vehicules):
+        """Fabrique l'historique GPS de la journée.
+
+        Pour les camions en mission, on appelle services.avancer_position() en
+        boucle en lui passant un horodatage croissant. Autrement dit, le seed
+        emprunte exactement le chemin de code de la simulation : l'historique
+        semé est indiscernable de celui qu'aurait produit
+        `simuler_positions --boucle` tournant depuis deux heures. Fabriquer les
+        points à la main aurait produit des données que la simulation n'aurait
+        jamais générées.
+        """
+        positions = []
+        maintenant = timezone.now()
+
+        # Deux heures d'historique, un relevé toutes les cinq minutes.
+        pas = timedelta(minutes=5)
+        instant = maintenant - timedelta(hours=2)
+        while instant <= maintenant:
+            for vehicule in vehicules:
+                position = services.avancer_position(
+                    vehicule, pas.total_seconds(), rng=random, maintenant=instant
+                )
+                if position is not None:
+                    positions.append(position)
+            instant += pas
+
+        # Les camions équipés qui ne roulent pas : au dépôt, moteur coupé. Leur
+        # boîtier fonctionne et remonte une vitesse nulle, ce qui donne « à
+        # l'arrêt » et non « aucune donnée ».
+        #
+        # Ces relevés sont créés directement : avancer_position() refuse de
+        # faire bouger un camion sans mission, et c'est le comportement voulu —
+        # le service simule un *déplacement*, pas un boîtier. Les motos, elles,
+        # n'ont pas de boîtier du tout : elles resteront sans aucune donnée.
+        en_mission = {indice for indice, _, _, _ in MISSIONS_EN_COURS}
+        for index, vehicule in enumerate(vehicules):
+            if index in en_mission or index == VEHICULE_SANS_SIGNAL:
+                continue
+            if not vehicule.fournisseur_gps_id:
+                continue
+            latitude, longitude = vehicule.trace.point_a(0)
+            positions.append(
+                PositionGPS.objects.create(
+                    vehicule=vehicule,
+                    latitude=Decimal(str(round(latitude, 6))),
+                    longitude=Decimal(str(round(longitude, 6))),
+                    vitesse_kmh=Decimal("0"),
+                    horodatage=maintenant - timedelta(minutes=random.randint(1, 6)),
+                    source=PositionGPS.Source.SIMULATION,
+                )
+            )
+
+        # Le camion dont le boîtier s'est tu. Ses positions sont créées
+        # directement et non par le service : il n'est sur aucune mission, donc
+        # avancer_position() refuserait de le faire bouger — ce qui est
+        # précisément le comportement attendu. Un boîtier muet sur un camion au
+        # garage, c'est le cas de la maquette.
+        muet = vehicules[VEHICULE_SANS_SIGNAL]
+        trace = muet.trace
+        dernier_echange = maintenant - timedelta(minutes=MINUTES_SANS_SIGNAL)
+        for rang in range(3):
+            progression = 0.08 + rang * 0.01
+            latitude, longitude = trace.point_a(progression)
+            positions.append(
+                PositionGPS.objects.create(
+                    vehicule=muet,
+                    latitude=Decimal(str(round(latitude, 6))),
+                    longitude=Decimal(str(round(longitude, 6))),
+                    vitesse_kmh=Decimal("0"),
+                    horodatage=dernier_echange - timedelta(minutes=(2 - rang) * 5),
+                    source=PositionGPS.Source.SIMULATION,
+                )
+            )
+
+        return positions
 
     def _creer_pleins(self, vehicules, chauffeurs):
         """Crée deux pleins par véhicule, cohérents dans le temps.
@@ -512,7 +706,15 @@ class Command(BaseCommand):
     # --- Compte rendu --------------------------------------------------------
 
     def _afficher_resume(
-        self, vehicules, chauffeurs, documents, missions, pleins, entretiens, utilisateur
+        self,
+        vehicules,
+        chauffeurs,
+        documents,
+        missions,
+        positions,
+        pleins,
+        entretiens,
+        utilisateur,
     ):
         """Affiche ce qui a été créé, puis les alertes attendues pour la démo."""
         self.stdout.write("")
@@ -520,7 +722,8 @@ class Command(BaseCommand):
             self.style.SUCCESS(
                 f"{len(vehicules)} véhicules, {len(chauffeurs)} chauffeurs, "
                 f"{len(documents)} documents, {len(missions)} missions, "
-                f"{len(pleins)} pleins et {len(entretiens)} entretiens créés."
+                f"{len(positions)} positions GPS, {len(pleins)} pleins et "
+                f"{len(entretiens)} entretiens créés."
             )
         )
 
@@ -563,6 +766,22 @@ class Command(BaseCommand):
                 f"la mission {mission_en_cours.depart} -> "
                 f"{mission_en_cours.destination} : toute nouvelle affectation "
                 "de ce véhicule sera refusée."
+            )
+
+        self.stdout.write("")
+        self.stdout.write("Etats GPS attendus a l'ouverture :")
+        for vehicule in vehicules:
+            statut = services.statut_gps(vehicule)
+            position = services.derniere_position(vehicule)
+            if position is None:
+                detail = "aucun releve"
+            else:
+                minutes = int(
+                    (timezone.now() - position.horodatage).total_seconds() // 60
+                )
+                detail = f"dernier releve il y a {minutes} min"
+            self.stdout.write(
+                f"  - {vehicule.immatriculation} : {statut.libelle} ({detail})"
             )
 
         self.stdout.write("")

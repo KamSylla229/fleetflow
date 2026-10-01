@@ -147,9 +147,20 @@ class VehiculeListeTest(VueConnecteeTest):
         self.assertContains(reponse, "AC 4821 RB")
         self.assertNotContains(reponse, "AB 1234 RB")
 
-    def test_le_badge_signale_une_assurance_absente(self):
+    def test_la_liste_affiche_le_statut_gps_et_le_fournisseur(self):
+        """Les deux colonnes ajoutees en phase B.
+
+        La colonne « Assurance » a quitte la liste pour suivre la maquette :
+        l'etat de l'assurance reste sur la fiche du camion et dans la page
+        Documents. Ce test a donc remplace celui qui cherchait « Aucune
+        attestation » ici.
+        """
         reponse = self.client.get(reverse("fleet:vehicule_liste"))
-        self.assertContains(reponse, "Aucune attestation")
+        self.assertContains(reponse, "Statut GPS")
+        self.assertContains(reponse, "Fournisseur")
+        # Aucun releve pour ces camions de test : l'etat est « aucune donnee ».
+        self.assertContains(reponse, "Aucune donnée")
+        self.assertContains(reponse, "non équipé")
 
     def test_les_filtres_survivent_a_la_pagination(self):
         """parametres_filtres doit contenir la recherche, sans le numéro de page."""
@@ -172,6 +183,12 @@ class VehiculeFicheTest(VueConnecteeTest):
         reponse = self.client.get(self.vehicule.get_absolute_url())
         self.assertContains(reponse, "ff-badge--rouge")
         self.assertContains(reponse, "Expiré depuis 10 j")
+
+    def test_la_fiche_signale_une_assurance_absente(self):
+        """Un dossier d'assurance vide doit alerter, pas rassurer."""
+        reponse = self.client.get(self.vehicule.get_absolute_url())
+        self.assertContains(reponse, "Aucune attestation")
+        self.assertContains(reponse, "ff-badge--ambre")
 
     def test_une_piece_sans_echeance_reste_neutre(self):
         creer_document(

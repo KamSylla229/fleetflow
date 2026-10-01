@@ -5,9 +5,11 @@
   La liste des camions — la page de référence du thème, calquée sur
   docs/maquette/03-camions.png : un tableau, puis quatre indicateurs.
 
-  La colonne « Fournisseur » de la maquette attend le modèle FournisseurGPS
-  (phase suivante) ; en attendant, la dernière colonne porte l'état de
-  l'assurance, qui est l'information la plus utile dont on dispose.
+  Deux colonnes de statut, et ce n'est pas un doublon : « Statut » est l'état
+  d'exploitation, saisi par le gestionnaire ; « Statut GPS » est calculé à
+  partir du dernier relevé du boîtier. Les deux peuvent se contredire, et
+  c'est précisément l'intérêt — un camion « disponible » qui ne remonte plus
+  rien depuis trois heures est une anomalie à voir.
 
   Tous les chiffres sont calculés dans services.py : ce gabarit n'additionne
   rien.
@@ -82,7 +84,8 @@
         <th class="ff-droite">Kilométrage</th>
         <th class="ff-droite">L / 100 km</th>
         <th>Statut</th>
-        <th>Assurance</th>
+        <th>Statut GPS</th>
+        <th>Fournisseur</th>
       </tr>
     </thead>
     <tbody>
@@ -120,12 +123,22 @@
             {% include "partials/_badge.html" with statut=vehicule.statut_operationnel only %}
           </td>
           <td>
-            {% include "partials/_badge.html" with statut=vehicule.statut_assurance only %}
+            {% include "partials/_badge.html" with statut=vehicule.statut_gps only %}
+          </td>
+          <td>
+            {% if vehicule.fournisseur_gps %}
+              {{ vehicule.fournisseur_gps.nom }}
+              {% if vehicule.boitier_id %}
+                <span class="ff-sous-ligne ff-chiffre">{{ vehicule.boitier_id }}</span>
+              {% endif %}
+            {% else %}
+              <span class="text-body-tertiary">non équipé</span>
+            {% endif %}
           </td>
         </tr>
       {% empty %}
         <tr>
-          <td colspan="8" class="ff-tableau__vide">
+          <td colspan="9" class="ff-tableau__vide">
             Aucun camion ne correspond à ces critères.
           </td>
         </tr>
