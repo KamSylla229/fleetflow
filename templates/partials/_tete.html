@@ -1,0 +1,16 @@
+{% load static %}
+{% comment %}
+  Tout ce qui va dans <head>, partagé par base.html (application) et
+  base_public.html (connexion). Les quatre feuilles sont servies en local :
+  l'application garde son style sans connexion Internet, ce qui compte pour
+  des PME dont la liaison est intermittente.
+
+  L'ordre est significatif : Bootstrap d'abord, le thème ensuite, pour que
+  fleetflow.css puisse le surcharger.
+{% endcomment %}
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="{% static 'vendor/bootstrap/bootstrap.min.css' %}">
+<link rel="stylesheet" href="{% static 'vendor/icones/bootstrap-icons.css' %}">
+<link rel="stylesheet" href="{% static 'css/polices.css' %}">
+<link rel="stylesheet" href="{% static 'css/fleetflow.css' %}">

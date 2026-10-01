@@ -32,7 +32,7 @@ class StatutEcheanceTest(TestCase):
     def test_document_valide(self):
         statut = services.statut_echeance(self.aujourdhui + timedelta(days=90))
         self.assertEqual(statut.code, services.ECHEANCE_VALIDE)
-        self.assertEqual(statut.classe_css, "bg-success")
+        self.assertEqual(statut.ton, "vert")
         self.assertFalse(statut.est_alerte)
 
     def test_document_bientot_expire(self):
@@ -44,7 +44,7 @@ class StatutEcheanceTest(TestCase):
     def test_document_expire(self):
         statut = services.statut_echeance(self.aujourdhui - timedelta(days=5))
         self.assertEqual(statut.code, services.ECHEANCE_EXPIREE)
-        self.assertEqual(statut.classe_css, "bg-danger")
+        self.assertEqual(statut.ton, "rouge")
         self.assertTrue(statut.est_alerte)
 
     def test_les_bornes_du_seuil(self):
@@ -591,8 +591,11 @@ class StatutAssuranceTest(TestCase):
     def test_sans_attestation(self):
         statut = services.statut_assurance(self.vehicule)
         self.assertEqual(statut.code, services.ECHEANCE_ABSENTE)
-        # Une absence d'attestation est une alerte, pas un état neutre.
+        # Une absence d'attestation est une alerte, pas un état neutre. Elle
+        # s'affiche en ambre : il y a une action à mener, mais ce n'est pas une
+        # échéance dépassée.
         self.assertTrue(statut.est_alerte)
+        self.assertEqual(statut.ton, "ambre")
 
     def test_avec_attestation_valide(self):
         creer_document(self.vehicule, Document.TypeDocument.ASSURANCE, jours=200)
@@ -666,3 +669,244 @@ class ActivationTest(TestCase):
                 destination="Parakou",
                 date_depart=self.aujourdhui,
             )
+
+
+class IndicateursFlotteTest(TestCase):
+    """Les quatre chiffres affichés sous la liste des camions."""
+
+    def setUp(self):
+        self.aujourdhui = timezone.localdate()
+        self.chauffeur = creer_chauffeur()
+        self.camion = creer_vehicule(
+            immatriculation="AB 1234 RB",
+            annee=2016,
+            kilometrage=400_000,
+            type_vehicule=Vehicule.TypeVehicule.CAMION,
+        )
+        self.utilitaire = creer_vehicule(
+            immatriculation="AC 4821 RB", annee=2020, kilometrage=100_000
+        )
+
+    def _plein(self, vehicule, jours, km, litres):
+        return PleinCarburant.objects.create(
+            vehicule=vehicule,
+            chauffeur=self.chauffeur,
+            date=self.aujourdhui - timedelta(days=jours),
+            litres=Decimal(litres),
+            prix_litre=Decimal("715"),
+            km_compteur=km,
+        )
+
+    def test_kilometrage_cumule_et_effectif(self):
+        indicateurs = services.indicateurs_flotte()
+        self.assertEqual(indicateurs.total, 2)
+        self.assertEqual(indicateurs.en_service, 2)
+        self.assertEqual(indicateurs.kilometrage_cumule, 500_000)
+
+    def test_consommation_ponderee_par_la_distance(self):
+        """Le gros rouleur doit peser plus lourd que le petit.
+
+        Camion : 320 L pour 1 000 km (32 L/100). Utilitaire : 20 L pour
+        200 km (10 L/100). La moyenne *arithmétique* donnerait 21,0. La
+        moyenne pondérée, seule juste, donne 340 L / 1 200 km = 28,3.
+        """
+        self._plein(self.camion, 30, 400_000, 300)
+        self._plein(self.camion, 10, 401_000, 320)
+        self._plein(self.utilitaire, 30, 100_000, 18)
+        self._plein(self.utilitaire, 10, 100_200, 20)
+
+        indicateurs = services.indicateurs_flotte()
+        self.assertEqual(indicateurs.consommation_moyenne, Decimal("28.3"))
+
+    def test_consommation_inconnue_sans_deux_pleins(self):
+        """Un seul plein par camion : aucune distance mesurable."""
+        self._plein(self.camion, 10, 400_000, 300)
+        indicateurs = services.indicateurs_flotte()
+        self.assertIsNone(indicateurs.consommation_moyenne)
+
+    def test_age_moyen_et_plus_ancien(self):
+        annee = self.aujourdhui.year
+        attendu = Decimal(((annee - 2016) + (annee - 2020))) / Decimal(2)
+        indicateurs = services.indicateurs_flotte()
+        self.assertEqual(
+            indicateurs.age_moyen, attendu.quantize(Decimal("0.1"))
+        )
+        self.assertEqual(indicateurs.annee_plus_ancien, 2016)
+
+    def test_immobilisation(self):
+        self.camion.statut = Vehicule.Statut.EN_MAINTENANCE
+        self.camion.save(update_fields=["statut"])
+
+        indicateurs = services.indicateurs_flotte()
+        self.assertEqual(indicateurs.immobilises, ("AB 1234 RB",))
+        # Un camion en maintenance n'est plus « en service ».
+        self.assertEqual(indicateurs.en_service, 1)
+
+    def test_les_camions_sortis_sont_exclus(self):
+        """La flotte, c'est ce qui est actif : le reste est de l'historique."""
+        creer_vehicule(immatriculation="AD 0000 RB", actif=False, kilometrage=900_000)
+        indicateurs = services.indicateurs_flotte()
+        self.assertEqual(indicateurs.total, 2)
+        self.assertEqual(indicateurs.kilometrage_cumule, 500_000)
+
+    def test_flotte_vide(self):
+        Vehicule.objects.all().delete()
+        indicateurs = services.indicateurs_flotte()
+        self.assertEqual(indicateurs.total, 0)
+        self.assertEqual(indicateurs.kilometrage_cumule, 0)
+        self.assertIsNone(indicateurs.consommation_moyenne)
+        self.assertIsNone(indicateurs.age_moyen)
+
+    def test_deux_requetes_quelle_que_soit_la_taille(self):
+        for index in range(6):
+            creer_vehicule(immatriculation=f"ZZ {1000 + index} RB")
+        with self.assertNumQueries(2):
+            services.indicateurs_flotte()
+
+
+class AnnotationsDeListeTest(TestCase):
+    """Les annotations qui évitent une requête par ligne de tableau."""
+
+    def setUp(self):
+        self.aujourdhui = timezone.localdate()
+        self.chauffeur = creer_chauffeur()
+        self.vehicule = creer_vehicule(kilometrage=50_000)
+
+    def test_consommation_moyenne_par_vehicule(self):
+        for jours, km, litres in ((20, 50_000, "40"), (5, 50_500, "45")):
+            PleinCarburant.objects.create(
+                vehicule=self.vehicule,
+                chauffeur=self.chauffeur,
+                date=self.aujourdhui - timedelta(days=jours),
+                litres=Decimal(litres),
+                prix_litre=Decimal("700"),
+                km_compteur=km,
+            )
+        vehicules = services.annoter_consommation_moyenne([self.vehicule])
+        # 45 L pour 500 km.
+        self.assertEqual(vehicules[0].consommation_moyenne, Decimal("9.0"))
+
+    def test_consommation_inconnue_et_non_nulle(self):
+        vehicules = services.annoter_consommation_moyenne([self.vehicule])
+        self.assertIsNone(vehicules[0].consommation_moyenne)
+
+    def test_annoter_une_liste_vide(self):
+        self.assertEqual(services.annoter_consommation_moyenne([]), [])
+
+    def test_missions_en_cours_par_vehicule_en_une_requete(self):
+        mission = services.creer_mission(
+            vehicule=self.vehicule,
+            chauffeur=self.chauffeur,
+            depart="Cotonou",
+            destination="Parakou",
+            date_depart=self.aujourdhui,
+        )
+        autres = [creer_vehicule(immatriculation=f"ZZ {2000 + i} RB") for i in range(5)]
+
+        with self.assertNumQueries(1):
+            par_vehicule = services.missions_en_cours_par_vehicule(
+                [self.vehicule] + autres
+            )
+
+        self.assertEqual(par_vehicule[self.vehicule.pk], mission)
+        self.assertNotIn(autres[0].pk, par_vehicule)
+
+    def test_missions_en_cours_par_chauffeur_en_une_requete(self):
+        mission = services.creer_mission(
+            vehicule=self.vehicule,
+            chauffeur=self.chauffeur,
+            depart="Cotonou",
+            destination="Lomé",
+            date_depart=self.aujourdhui,
+        )
+        with self.assertNumQueries(1):
+            par_chauffeur = services.missions_en_cours_par_chauffeur([self.chauffeur])
+        self.assertEqual(par_chauffeur[self.chauffeur.pk], mission)
+
+
+class StatutsAffichablesTest(TestCase):
+    """La traduction d'un état en ton de pastille, décidée dans les services."""
+
+    def setUp(self):
+        self.aujourdhui = timezone.localdate()
+        self.vehicule = creer_vehicule()
+        self.chauffeur = creer_chauffeur()
+
+    def test_tons_du_statut_operationnel(self):
+        attendus = {
+            Vehicule.Statut.EN_MISSION: "vert",
+            Vehicule.Statut.DISPONIBLE: "neutre",
+            Vehicule.Statut.EN_MAINTENANCE: "ambre",
+            Vehicule.Statut.HORS_SERVICE: "rouge",
+        }
+        for statut, ton in attendus.items():
+            with self.subTest(statut=statut):
+                self.vehicule.statut = statut
+                self.assertEqual(
+                    services.statut_operationnel(self.vehicule).ton, ton
+                )
+
+    def test_un_camion_sorti_de_la_flotte_prime_sur_son_statut(self):
+        """Inutile de savoir qu'il est « disponible » s'il n'est plus là."""
+        self.vehicule.actif = False
+        self.vehicule.statut = Vehicule.Statut.DISPONIBLE
+        statut = services.statut_operationnel(self.vehicule)
+        self.assertEqual(statut.ton, "rouge")
+        self.assertEqual(statut.libelle, "Sorti de la flotte")
+
+    def test_statut_chauffeur_en_mission(self):
+        services.creer_mission(
+            vehicule=self.vehicule,
+            chauffeur=self.chauffeur,
+            depart="Cotonou",
+            destination="Parakou",
+            date_depart=self.aujourdhui,
+        )
+        statut = services.statut_chauffeur(self.chauffeur)
+        self.assertEqual(statut.code, "en_mission")
+        self.assertEqual(statut.ton, "vert")
+
+    def test_statut_chauffeur_disponible(self):
+        self.assertEqual(services.statut_chauffeur(self.chauffeur).ton, "neutre")
+
+    def test_statut_chauffeur_desactive(self):
+        self.chauffeur.actif = False
+        statut = services.statut_chauffeur(self.chauffeur)
+        self.assertEqual(statut.libelle, "Désactivé")
+        self.assertEqual(statut.ton, "rouge")
+
+    def test_statut_chauffeur_sans_requete_si_mission_fournie(self):
+        """Passer None explicitement signifie « j'ai vérifié, il n'y en a pas ».
+
+        Ce test a révélé une ambiguïté de signature : avec un défaut à None,
+        le service ne pouvait pas distinguer « pas fourni » de « pas de
+        mission », et interrogeait la base dans les deux cas. D'où la
+        sentinelle _NON_FOURNI.
+        """
+        with self.assertNumQueries(0):
+            statut = services.statut_chauffeur(self.chauffeur, mission_en_cours=None)
+        self.assertEqual(statut.code, "disponible")
+
+    def test_statut_chauffeur_interroge_si_rien_n_est_fourni(self):
+        with self.assertNumQueries(1):
+            services.statut_chauffeur(self.chauffeur)
+
+    def test_tons_du_statut_mission(self):
+        attendus = {
+            Mission.Statut.EN_COURS: "vert",
+            Mission.Statut.PLANIFIEE: "ambre",
+            Mission.Statut.TERMINEE: "neutre",
+            Mission.Statut.ANNULEE: "rouge",
+        }
+        mission = Mission(
+            vehicule=self.vehicule,
+            chauffeur=self.chauffeur,
+            depart="Cotonou",
+            destination="Bohicon",
+            date_depart=self.aujourdhui,
+            km_depart=1_000,
+        )
+        for statut, ton in attendus.items():
+            with self.subTest(statut=statut):
+                mission.statut = statut
+                self.assertEqual(services.statut_mission(mission).ton, ton)

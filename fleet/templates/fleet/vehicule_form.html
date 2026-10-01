@@ -1,49 +1,36 @@
 {% extends "base.html" %}
 
 {% block titre %}{{ titre }} — FleetFlow{% endblock %}
-
-{% block entete %}
-<h1 class="h3 mb-3">{{ titre }}</h1>
+{% block titre_page %}{{ titre }}{% endblock %}
+{% block sous_titre %}
+  Les documents administratifs se saisissent après création, depuis
+  l'administration Django.
 {% endblock %}
 
 {% block contenu %}
 <div class="row">
   <div class="col-lg-7">
-    <div class="card shadow-sm">
-      <div class="card-body">
-
+    <div class="ff-carte">
+      <div class="ff-carte__corps">
         {% comment %}
-          novalidate est absent volontairement : la validation du navigateur
-          (champ requis, nombre) rend service à l'utilisateur. Elle ne remplace
-          pas celle de Django, qui reste la seule à laquelle on fait confiance
-          — une requête peut toujours arriver sans passer par un navigateur.
+          Pas de novalidate : la validation du navigateur rend service à
+          l'utilisateur. Elle ne remplace pas celle de Django, qui reste la
+          seule à laquelle on fait confiance — une requête peut toujours
+          arriver sans passer par un navigateur.
         {% endcomment %}
         <form method="post">
           {% csrf_token %}
           {% include "partials/_champs_formulaire.html" %}
-
-          <div class="d-flex gap-2">
-            <button type="submit" class="btn btn-dark">Enregistrer</button>
-            {% if object %}
-              <a class="btn btn-outline-secondary" href="{{ object.get_absolute_url }}">
-                Annuler
-              </a>
-            {% else %}
-              <a class="btn btn-outline-secondary"
-                 href="{% url 'fleet:vehicule_liste' %}">Annuler</a>
-            {% endif %}
+          <div class="ff-formulaire-actions">
+            <button type="submit" class="ff-btn ff-btn--principal">Enregistrer</button>
+            <a class="ff-btn ff-btn--secondaire"
+               href="{% if object %}{{ object.get_absolute_url }}{% else %}{% url 'fleet:vehicule_liste' %}{% endif %}">
+              Annuler
+            </a>
           </div>
         </form>
-
       </div>
     </div>
-
-    {% if not object %}
-      <p class="text-body-secondary small mt-3 mb-0">
-        Les documents administratifs (assurance, visite technique, carte grise)
-        se saisissent après création, depuis l'administration Django.
-      </p>
-    {% endif %}
   </div>
 </div>
 {% endblock %}

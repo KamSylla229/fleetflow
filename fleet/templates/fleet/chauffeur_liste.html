@@ -1,35 +1,47 @@
 {% extends "base.html" %}
 
-{% block titre %}Chauffeurs — FleetFlow{% endblock %}
+{% comment %}
+  Les chauffeurs et leurs affectations, calqué sur
+  docs/maquette/06-chauffeurs.png : un tableau unique, les dates d'expiration
+  proches mises en évidence.
 
-{% block entete %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h1 class="h3 mb-0">Chauffeurs</h1>
-  <a class="btn btn-dark" href="{% url 'fleet:chauffeur_creer' %}">
-    Nouveau chauffeur
+  Deux pastilles de nature différente par ligne : l'état du permis (échéance
+  datée, calculée par services.statut_permis) et l'activité (en mission,
+  disponible, désactivé, par services.statut_chauffeur). Les mélanger en une
+  seule colonne ferait perdre une des deux informations.
+{% endcomment %}
+
+{% block titre %}Chauffeurs — FleetFlow{% endblock %}
+{% block titre_page %}Chauffeurs et affectations{% endblock %}
+{% block sous_titre %}
+  {{ page_obj.paginator.count }} chauffeur{{ page_obj.paginator.count|pluralize }}
+  affiché{{ page_obj.paginator.count|pluralize }}
+{% endblock %}
+
+{% block actions %}
+  <a class="ff-btn ff-btn--principal" href="{% url 'fleet:chauffeur_creer' %}">
+    <i class="bi bi-plus-lg" aria-hidden="true"></i> Ajouter un chauffeur
   </a>
-</div>
 {% endblock %}
 
 {% block contenu %}
 
-<form method="get" class="card card-body shadow-sm mb-3">
-  <div class="row g-2 align-items-end">
-
-    <div class="col-md-4">
-      <label for="recherche" class="form-label small mb-1">Recherche</label>
+<form method="get" class="ff-filtres">
+  <div class="ff-filtres__grille">
+    <div>
+      <label class="ff-etiquette" for="recherche">Recherche</label>
       <input type="search" id="recherche" name="q" value="{{ recherche }}"
              class="form-control" placeholder="Nom, téléphone ou permis">
     </div>
-
-    <div class="col-md-3">
-      <label for="permis" class="form-label small mb-1">Permis</label>
+    <div>
+      <label class="ff-etiquette" for="permis">Permis</label>
       <select id="permis" name="permis" class="form-select">
         <option value="">Tous</option>
         {% comment %}
-          Les valeurs sont celles des constantes de services.py. Les écrire en
-          clair ici est le point faible de ce filtre : une divergence ne
-          provoquerait aucune erreur, seulement un filtre sans effet.
+          Les valeurs reprennent les constantes services.ECHEANCE_* ; elles
+          sont écrites en clair ici, ce qui est le point faible du filtre : une
+          divergence ne lèverait aucune erreur, le filtre serait seulement sans
+          effet. Noté au BACKLOG.
         {% endcomment %}
         <option value="expiree" {% if permis_choisi == "expiree" %}selected{% endif %}>
           Expiré
@@ -42,70 +54,77 @@
         </option>
       </select>
     </div>
-
-    <div class="col-md-3">
-      <label for="actif" class="form-label small mb-1">Effectif</label>
+    <div>
+      <label class="ff-etiquette" for="actif">Effectif</label>
       <select id="actif" name="actif" class="form-select">
         <option value="1" {% if actif_choisi == "1" %}selected{% endif %}>Actifs</option>
         <option value="0" {% if actif_choisi == "0" %}selected{% endif %}>Désactivés</option>
         <option value="tous" {% if actif_choisi == "tous" %}selected{% endif %}>Tous</option>
       </select>
     </div>
-
-    <div class="col-md-2 d-flex gap-2">
-      <button type="submit" class="btn btn-secondary w-100">Filtrer</button>
-      <a href="{% url 'fleet:chauffeur_liste' %}" class="btn btn-outline-secondary"
-         title="Réinitialiser les filtres">×</a>
+    <div class="ff-filtres__actions">
+      <button type="submit" class="ff-btn ff-btn--secondaire">
+        <i class="bi bi-funnel" aria-hidden="true"></i> Filtrer
+      </button>
+      <a href="{% url 'fleet:chauffeur_liste' %}" class="ff-btn ff-btn--secondaire"
+         title="Réinitialiser les filtres">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
+      </a>
     </div>
-
   </div>
 </form>
 
-<div class="card shadow-sm">
-  <div class="table-responsive">
-    <table class="table table-hover align-middle mb-0">
-      <thead class="table-light">
+<div class="ff-tableau-cadre">
+  <table class="ff-tableau">
+    <thead>
+      <tr>
+        <th>Chauffeur</th>
+        <th>Téléphone</th>
+        <th>Permis</th>
+        <th>Expiration</th>
+        <th>Camion</th>
+        <th>Activité</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for chauffeur in chauffeurs %}
         <tr>
-          <th>Nom</th>
-          <th>Téléphone</th>
-          <th>Numéro de permis</th>
-          <th>Permis</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for chauffeur in chauffeurs %}
-          <tr{% if not chauffeur.actif %} class="table-secondary"{% endif %}>
-            <td>
-              <a href="{{ chauffeur.get_absolute_url }}" class="fw-semibold">
-                {{ chauffeur.nom }}
+          <td>
+            <a class="fw-medium" href="{{ chauffeur.get_absolute_url }}">
+              {{ chauffeur.nom }}
+            </a>
+          </td>
+          <td class="ff-chiffre">{{ chauffeur.telephone }}</td>
+          <td class="ff-chiffre">{{ chauffeur.numero_permis }}</td>
+          <td>
+            {% include "partials/_badge.html" with statut=chauffeur.statut_permis only %}
+            <span class="ff-sous-ligne ff-chiffre">
+              {{ chauffeur.date_expiration_permis|date:"d/m/Y" }}
+            </span>
+          </td>
+          <td>
+            {% if chauffeur.mission_en_cours %}
+              <a class="ff-chiffre"
+                 href="{{ chauffeur.mission_en_cours.vehicule.get_absolute_url }}">
+                {{ chauffeur.mission_en_cours.vehicule.immatriculation }}
               </a>
-              {% if not chauffeur.actif %}
-                <span class="badge bg-secondary ms-1">Désactivé</span>
-              {% endif %}
-            </td>
-            <td>{{ chauffeur.telephone }}</td>
-            <td>{{ chauffeur.numero_permis }}</td>
-            <td>
-              <span class="badge {{ chauffeur.statut_permis.classe_css }}">
-                {{ chauffeur.statut_permis.libelle }}
-              </span>
-            </td>
-            <td class="text-end">
-              <a class="btn btn-sm btn-outline-dark"
-                 href="{{ chauffeur.get_absolute_url }}">Fiche</a>
-            </td>
-          </tr>
-        {% empty %}
-          <tr>
-            <td colspan="5" class="text-center text-body-secondary py-4">
-              Aucun chauffeur ne correspond à ces critères.
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+            {% else %}
+              <span class="text-body-tertiary">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% include "partials/_badge.html" with statut=chauffeur.statut_activite only %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr>
+          <td colspan="6" class="ff-tableau__vide">
+            Aucun chauffeur ne correspond à ces critères.
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </div>
 
 {% include "partials/_pagination.html" %}

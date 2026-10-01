@@ -1,304 +1,309 @@
 {% extends "base.html" %}
+{% load humanize %}
+
+{% comment %}
+  La fiche d'un camion : son état, ses pièces administratives et son activité
+  récente. Le bloc « Dernière position » viendra se glisser dans la colonne de
+  droite quand le modèle PositionGPS existera.
+{% endcomment %}
 
 {% block titre %}{{ vehicule.immatriculation }} — FleetFlow{% endblock %}
 
-{% block entete %}
-<div class="d-flex justify-content-between align-items-start mb-3">
-  <div>
-    <h1 class="h3 mb-1">{{ vehicule.immatriculation }}</h1>
-    <p class="text-body-secondary mb-0">
-      {{ vehicule.marque }} {{ vehicule.modele }} — {{ vehicule.get_type_vehicule_display }},
-      mise en circulation en {{ vehicule.annee }}
-    </p>
-  </div>
-  <div class="d-flex gap-2">
-    <a class="btn btn-outline-dark"
-       href="{% url 'fleet:vehicule_modifier' vehicule.pk %}">Modifier</a>
+{% block titre_page %}
+  <span class="ff-chiffre">{{ vehicule.immatriculation }}</span>
+{% endblock %}
 
-    {% comment %}
-      La désactivation est une écriture : elle passe par un POST, avec le jeton
-      CSRF. onsubmit demande confirmation — une sécurité d'interface, jamais de
-      sécurité réelle : la vraie vérification est celle du service, qui refuse
-      de sortir un véhicule engagé sur une mission.
-    {% endcomment %}
-    <form method="post" action="{% url 'fleet:vehicule_activation' vehicule.pk %}"
-          onsubmit="return confirm('Confirmer le changement pour {{ vehicule.immatriculation }} ?');">
-      {% csrf_token %}
-      {% if vehicule.actif %}
-        <button type="submit" class="btn btn-outline-danger">
-          Sortir de la flotte
-        </button>
-      {% else %}
-        <button type="submit" class="btn btn-outline-success">
-          Réintégrer dans la flotte
-        </button>
-      {% endif %}
-    </form>
-  </div>
-</div>
+{% block sous_titre %}
+  {{ vehicule.marque }} {{ vehicule.modele }} ·
+  {{ vehicule.get_type_vehicule_display }} ·
+  mise en circulation en {{ vehicule.annee }}
+{% endblock %}
+
+{% block actions %}
+  <a class="ff-btn ff-btn--secondaire"
+     href="{% url 'fleet:vehicule_modifier' vehicule.pk %}">
+    <i class="bi bi-pencil" aria-hidden="true"></i> Modifier
+  </a>
+
+  {% comment %}
+    La sortie de flotte est une écriture : elle passe par un POST avec le
+    jeton CSRF. La confirmation est un garde-fou d'interface ; la vraie
+    vérification est celle du service, qui refuse de sortir un camion engagé
+    sur une mission.
+  {% endcomment %}
+  <form method="post" action="{% url 'fleet:vehicule_activation' vehicule.pk %}"
+        onsubmit="return confirm('Confirmer le changement pour {{ vehicule.immatriculation }} ?');">
+    {% csrf_token %}
+    {% if vehicule.actif %}
+      <button type="submit" class="ff-btn ff-btn--danger">
+        <i class="bi bi-box-arrow-right" aria-hidden="true"></i> Sortir de la flotte
+      </button>
+    {% else %}
+      <button type="submit" class="ff-btn ff-btn--secondaire">
+        <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> Réintégrer
+      </button>
+    {% endif %}
+  </form>
 {% endblock %}
 
 {% block contenu %}
 
 {% if not vehicule.actif %}
-  <div class="alert alert-secondary">
-    Ce véhicule est sorti de la flotte active. Son historique reste consultable,
-    mais il ne peut plus recevoir de mission.
+  <div class="ff-bandeau ff-bandeau--neutre">
+    <i class="bi bi-archive" aria-hidden="true"></i>
+    <span class="ff-bandeau__corps">
+      Ce camion est sorti de la flotte active. Son historique reste
+      consultable, mais il ne peut plus recevoir de mission.
+    </span>
   </div>
 {% endif %}
 
-<div class="row g-4">
+<div class="ff-grille ff-grille--5-7">
 
-  <div class="col-lg-5">
-    <div class="card shadow-sm h-100">
-      <div class="card-header fw-semibold">Identité et état</div>
-      <div class="card-body">
-        <dl class="row mb-0">
-          <dt class="col-6">Statut</dt>
-          <dd class="col-6">{{ vehicule.get_statut_display }}</dd>
-
-          <dt class="col-6">Kilométrage</dt>
-          <dd class="col-6">{{ vehicule.kilometrage }} km</dd>
-
-          <dt class="col-6">Assurance</dt>
-          <dd class="col-6">
-            <span class="badge {{ statut_assurance.classe_css }}">
-              {{ statut_assurance.libelle }}
-            </span>
+  <div class="ff-carte">
+    <div class="ff-carte__entete">
+      <h2 class="ff-carte__titre">Identité et état</h2>
+    </div>
+    <div class="ff-carte__corps">
+      <dl class="ff-donnees">
+        <div class="ff-donnees__ligne">
+          <dt class="ff-donnees__cle">Statut</dt>
+          <dd class="ff-donnees__valeur">
+            {% include "partials/_badge.html" with statut=statut_operationnel only %}
           </dd>
-
-          <dt class="col-6">Visite technique</dt>
-          <dd class="col-6">
-            <span class="badge {{ statut_visite.classe_css }}">
-              {{ statut_visite.libelle }}
-            </span>
+        </div>
+        <div class="ff-donnees__ligne">
+          <dt class="ff-donnees__cle">Kilométrage</dt>
+          <dd class="ff-donnees__valeur ff-chiffre">
+            {{ vehicule.kilometrage|intcomma }} km
           </dd>
-
-          <dt class="col-6">Chauffeur affecté</dt>
-          <dd class="col-6">
+        </div>
+        <div class="ff-donnees__ligne">
+          <dt class="ff-donnees__cle">Assurance</dt>
+          <dd class="ff-donnees__valeur">
+            {% include "partials/_badge.html" with statut=statut_assurance only %}
+          </dd>
+        </div>
+        <div class="ff-donnees__ligne">
+          <dt class="ff-donnees__cle">Visite technique</dt>
+          <dd class="ff-donnees__valeur">
+            {% include "partials/_badge.html" with statut=statut_visite only %}
+          </dd>
+        </div>
+        <div class="ff-donnees__ligne">
+          <dt class="ff-donnees__cle">Chauffeur affecté</dt>
+          <dd class="ff-donnees__valeur">
             {% if mission_en_cours %}
               <a href="{{ mission_en_cours.chauffeur.get_absolute_url }}">
                 {{ mission_en_cours.chauffeur.nom }}
               </a>
             {% else %}
-              <span class="text-body-secondary">aucun</span>
+              <span class="text-body-tertiary">aucun</span>
             {% endif %}
           </dd>
-        </dl>
-      </div>
+        </div>
+      </dl>
     </div>
   </div>
 
-  <div class="col-lg-7">
-    <div class="card shadow-sm h-100">
-      <div class="card-header fw-semibold">Mission en cours</div>
-      <div class="card-body">
-        {% if mission_en_cours %}
-          <p class="mb-1">
-            <span class="fw-semibold">
-              {{ mission_en_cours.depart }} → {{ mission_en_cours.destination }}
-            </span>
-          </p>
-          <p class="text-body-secondary small mb-2">
-            Partie le {{ mission_en_cours.date_depart|date:"d/m/Y" }}, compteur au
-            départ : {{ mission_en_cours.km_depart }} km.
-          </p>
-          {% if mission_en_cours.commentaire %}
-            <p class="mb-0 fst-italic">{{ mission_en_cours.commentaire }}</p>
-          {% endif %}
-        {% else %}
-          <p class="text-body-secondary mb-0">
-            Ce véhicule n'est engagé sur aucune mission : il peut être affecté.
-          </p>
+  <div class="ff-carte">
+    <div class="ff-carte__entete">
+      <h2 class="ff-carte__titre">Mission en cours</h2>
+      {% if mission_en_cours %}
+        <a class="ff-carte__lien"
+           href="{% url 'fleet:mission_cloturer' mission_en_cours.pk %}">Clôturer</a>
+      {% endif %}
+    </div>
+    <div class="ff-carte__corps">
+      {% if mission_en_cours %}
+        <p class="fs-5 fw-semibold mb-1">
+          {{ mission_en_cours.depart }} → {{ mission_en_cours.destination }}
+        </p>
+        <p class="ff-entete__sous-titre mb-2">
+          Partie le
+          <span class="ff-chiffre">{{ mission_en_cours.date_depart|date:"d/m/Y" }}</span>,
+          compteur au départ
+          <span class="ff-chiffre">{{ mission_en_cours.km_depart|intcomma }} km</span>
+        </p>
+        {% if mission_en_cours.commentaire %}
+          <p class="fst-italic mb-0">{{ mission_en_cours.commentaire }}</p>
         {% endif %}
-      </div>
+      {% else %}
+        <p class="text-body-secondary mb-0">
+          Ce camion n'est engagé sur aucune mission : il peut être affecté.
+        </p>
+      {% endif %}
     </div>
   </div>
 
-  <div class="col-12">
-    <div class="card shadow-sm">
-      <div class="card-header fw-semibold">
-        Documents administratifs
-      </div>
-      <div class="table-responsive">
-        <table class="table table-sm table-hover align-middle mb-0">
-          <thead class="table-light">
+</div>
+
+<div class="ff-pile mt-4">
+
+  <div class="ff-carte">
+    <div class="ff-carte__entete">
+      <h2 class="ff-carte__titre">Documents administratifs</h2>
+      <a class="ff-carte__lien" href="{% url 'fleet:document_liste' %}">Tout voir</a>
+    </div>
+    <div class="ff-tableau-cadre">
+      <table class="ff-tableau">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Numéro</th>
+            <th>Émis le</th>
+            <th>Expire le</th>
+            <th>État</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for document in documents %}
             <tr>
-              <th>Type</th>
-              <th>Numéro</th>
-              <th>Émis le</th>
-              <th>Expire le</th>
-              <th>État</th>
+              <td>{{ document.get_type_document_display }}</td>
+              <td class="ff-chiffre">{{ document.numero|default:"—" }}</td>
+              <td class="ff-chiffre">{{ document.date_emission|date:"d/m/Y"|default:"—" }}</td>
+              <td class="ff-chiffre">{{ document.date_expiration|date:"d/m/Y"|default:"—" }}</td>
+              <td>{% include "partials/_badge.html" with statut=document.statut only %}</td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="5" class="ff-tableau__vide">
+                Aucun document enregistré. La saisie se fait pour l'instant
+                depuis l'administration Django.
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="ff-grille ff-grille--2">
+
+    <div class="ff-carte">
+      <div class="ff-carte__entete">
+        <h2 class="ff-carte__titre">10 dernières missions</h2>
+        <a class="ff-carte__lien"
+           href="{% url 'fleet:mission_liste' %}?vehicule={{ vehicule.pk }}">Tout voir</a>
+      </div>
+      <div class="ff-tableau-cadre">
+        <table class="ff-tableau">
+          <thead>
+            <tr>
+              <th>Départ</th>
+              <th>Trajet</th>
+              <th>Chauffeur</th>
+              <th class="ff-droite">Distance</th>
             </tr>
           </thead>
           <tbody>
-            {% for document in documents %}
+            {% for mission in missions %}
               <tr>
-                <td>{{ document.get_type_document_display }}</td>
-                <td>{{ document.numero|default:"—" }}</td>
-                <td>{{ document.date_emission|date:"d/m/Y"|default:"—" }}</td>
-                <td>{{ document.date_expiration|date:"d/m/Y"|default:"—" }}</td>
-                <td>
-                  <span class="badge {{ document.statut.classe_css }}">
-                    {{ document.statut.libelle }}
-                  </span>
+                <td class="ff-chiffre">{{ mission.date_depart|date:"d/m/y" }}</td>
+                <td>{{ mission.depart }} → {{ mission.destination }}</td>
+                <td>{{ mission.chauffeur.nom }}</td>
+                <td class="ff-droite">
+                  {% if mission.distance is not None %}
+                    <span class="ff-chiffre">{{ mission.distance|intcomma }} km</span>
+                  {% else %}
+                    <span class="text-body-tertiary">{{ mission.get_statut_display }}</span>
+                  {% endif %}
                 </td>
               </tr>
             {% empty %}
-              <tr>
-                <td colspan="5" class="text-center text-body-secondary py-3">
-                  Aucun document enregistré. La saisie se fait pour l'instant
-                  depuis l'administration Django.
-                </td>
-              </tr>
+              <tr><td colspan="4" class="ff-tableau__vide">Aucune mission enregistrée.</td></tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
     </div>
+
+    <div class="ff-carte">
+      <div class="ff-carte__entete">
+        <h2 class="ff-carte__titre">10 derniers pleins</h2>
+        <a class="ff-carte__lien"
+           href="{% url 'fleet:plein_liste' %}?vehicule={{ vehicule.pk }}">Tout voir</a>
+      </div>
+      <div class="ff-tableau-cadre">
+        <table class="ff-tableau">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th class="ff-droite">Litres</th>
+              <th class="ff-droite">Coût</th>
+              <th class="ff-droite">L / 100 km</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for plein in pleins %}
+              <tr>
+                <td class="ff-chiffre">{{ plein.date|date:"d/m/y" }}</td>
+                <td class="ff-droite ff-chiffre">{{ plein.litres }}</td>
+                <td class="ff-droite ff-chiffre">
+                  {{ plein.cout_total|floatformat:0|intcomma }} F
+                </td>
+                <td class="ff-droite">
+                  {% if plein.consommation is not None %}
+                    <span class="ff-chiffre fw-medium">{{ plein.consommation }}</span>
+                  {% else %}
+                    <span class="text-body-tertiary">—</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="4" class="ff-tableau__vide">Aucun plein enregistré.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
   </div>
 
-  {% block fiche_activite %}
-    <div class="col-lg-6">
-      <div class="card shadow-sm h-100">
-        <div class="card-header d-flex justify-content-between align-items-center">
-          <span class="fw-semibold">10 dernières missions</span>
-          <a class="btn btn-sm btn-outline-secondary"
-             href="{% url 'fleet:mission_liste' %}?vehicule={{ vehicule.pk }}">
-            Tout voir
-          </a>
-        </div>
-        <div class="table-responsive">
-          <table class="table table-sm table-hover align-middle mb-0">
-            <thead class="table-light">
-              <tr>
-                <th>Départ</th>
-                <th>Trajet</th>
-                <th>Chauffeur</th>
-                <th class="text-end">Distance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for mission in missions %}
-                <tr>
-                  <td>{{ mission.date_depart|date:"d/m/y" }}</td>
-                  <td>{{ mission.depart }} → {{ mission.destination }}</td>
-                  <td>{{ mission.chauffeur.nom }}</td>
-                  <td class="text-end">
-                    {% if mission.distance is not None %}
-                      {{ mission.distance }} km
-                    {% else %}
-                      <span class="text-body-secondary">{{ mission.get_statut_display }}</span>
-                    {% endif %}
-                  </td>
-                </tr>
-              {% empty %}
-                <tr>
-                  <td colspan="4" class="text-center text-body-secondary py-3">
-                    Aucune mission enregistrée.
-                  </td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </div>
+  <div class="ff-carte">
+    <div class="ff-carte__entete">
+      <h2 class="ff-carte__titre">Entretiens</h2>
+      <a class="ff-carte__lien"
+         href="{% url 'fleet:entretien_liste' %}?vehicule={{ vehicule.pk }}">Tout voir</a>
     </div>
-
-    <div class="col-lg-6">
-      <div class="card shadow-sm h-100">
-        <div class="card-header d-flex justify-content-between align-items-center">
-          <span class="fw-semibold">10 derniers pleins</span>
-          <a class="btn btn-sm btn-outline-secondary"
-             href="{% url 'fleet:plein_liste' %}?vehicule={{ vehicule.pk }}">
-            Tout voir
-          </a>
-        </div>
-        <div class="table-responsive">
-          <table class="table table-sm table-hover align-middle mb-0">
-            <thead class="table-light">
-              <tr>
-                <th>Date</th>
-                <th class="text-end">Litres</th>
-                <th class="text-end">Coût</th>
-                <th class="text-end">L/100 km</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for plein in pleins %}
-                <tr>
-                  <td>{{ plein.date|date:"d/m/y" }}</td>
-                  <td class="text-end">{{ plein.litres }}</td>
-                  <td class="text-end">{{ plein.cout_total|floatformat:0 }}</td>
-                  <td class="text-end">
-                    {% if plein.consommation is not None %}
-                      <span class="fw-semibold">{{ plein.consommation }}</span>
-                    {% else %}
-                      <span class="text-body-secondary">—</span>
-                    {% endif %}
-                  </td>
-                </tr>
-              {% empty %}
-                <tr>
-                  <td colspan="4" class="text-center text-body-secondary py-3">
-                    Aucun plein enregistré.
-                  </td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </div>
+    <div class="ff-tableau-cadre">
+      <table class="ff-tableau">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Intervention</th>
+            <th>Garage</th>
+            <th class="ff-droite">Au compteur</th>
+            <th class="ff-droite">Coût</th>
+            <th>Prochaine échéance</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entretien in entretiens %}
+            <tr>
+              <td class="ff-chiffre">{{ entretien.date|date:"d/m/y" }}</td>
+              <td>{{ entretien.get_type_entretien_display }}</td>
+              <td>{{ entretien.prestataire }}</td>
+              <td class="ff-droite ff-chiffre">{{ entretien.km|intcomma }} km</td>
+              <td class="ff-droite ff-chiffre">
+                {{ entretien.cout|floatformat:0|intcomma }} F
+              </td>
+              <td>
+                {% include "partials/_badge.html" with statut=entretien.statut only %}
+                {% if entretien.prochaine_echeance_km %}
+                  <span class="ff-sous-ligne ff-chiffre">
+                    à {{ entretien.prochaine_echeance_km|intcomma }} km
+                  </span>
+                {% endif %}
+              </td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="6" class="ff-tableau__vide">Aucun entretien enregistré.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
-
-    <div class="col-12">
-      <div class="card shadow-sm">
-        <div class="card-header d-flex justify-content-between align-items-center">
-          <span class="fw-semibold">Entretiens</span>
-          <a class="btn btn-sm btn-outline-secondary"
-             href="{% url 'fleet:entretien_liste' %}?vehicule={{ vehicule.pk }}">
-            Tout voir
-          </a>
-        </div>
-        <div class="table-responsive">
-          <table class="table table-sm table-hover align-middle mb-0">
-            <thead class="table-light">
-              <tr>
-                <th>Date</th>
-                <th>Intervention</th>
-                <th>Prestataire</th>
-                <th class="text-end">Au compteur</th>
-                <th class="text-end">Coût</th>
-                <th>Prochaine échéance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for entretien in entretiens %}
-                <tr>
-                  <td>{{ entretien.date|date:"d/m/y" }}</td>
-                  <td>{{ entretien.get_type_entretien_display }}</td>
-                  <td>{{ entretien.prestataire }}</td>
-                  <td class="text-end">{{ entretien.km }} km</td>
-                  <td class="text-end">{{ entretien.cout|floatformat:0 }} FCFA</td>
-                  <td>
-                    <span class="badge {{ entretien.statut.classe_css }}">
-                      {{ entretien.statut.libelle }}
-                    </span>
-                  </td>
-                </tr>
-              {% empty %}
-                <tr>
-                  <td colspan="6" class="text-center text-body-secondary py-3">
-                    Aucun entretien enregistré.
-                  </td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  {% endblock %}
+  </div>
 
 </div>
 

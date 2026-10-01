@@ -69,8 +69,14 @@ class Vehicule(models.Model):
 
     class Meta:
         ordering = ["immatriculation"]
-        verbose_name = "Véhicule"
-        verbose_name_plural = "Véhicules"
+        # Le modèle garde le nom Vehicule (le renommer coûterait une migration
+        # de table et des centaines de références, pour aucune valeur), mais
+        # l'interface parle de « camion », le mot employé par les clients.
+        # verbose_name est exactement fait pour cet écart entre le nom
+        # technique et le nom métier : il alimente l'admin, les libellés de
+        # formulaire et les messages d'erreur.
+        verbose_name = "Camion"
+        verbose_name_plural = "Camions"
 
     def __str__(self):
         return f"{self.immatriculation} — {self.marque} {self.modele}"
@@ -222,7 +228,7 @@ class Mission(models.Model):
         Vehicule,
         on_delete=models.PROTECT,
         related_name="missions",
-        verbose_name="Véhicule",
+        verbose_name="Camion",
     )
     chauffeur = models.ForeignKey(
         Chauffeur,
@@ -328,7 +334,7 @@ class Entretien(models.Model):
         Vehicule,
         on_delete=models.PROTECT,
         related_name="entretiens",
-        verbose_name="Véhicule",
+        verbose_name="Camion",
     )
     type_entretien = models.CharField(
         max_length=20,
@@ -377,7 +383,7 @@ class PleinCarburant(models.Model):
         Vehicule,
         on_delete=models.PROTECT,
         related_name="pleins",
-        verbose_name="Véhicule",
+        verbose_name="Camion",
     )
     chauffeur = models.ForeignKey(
         Chauffeur,
@@ -458,7 +464,7 @@ class Document(models.Model):
         Vehicule,
         on_delete=models.PROTECT,
         related_name="documents",
-        verbose_name="Véhicule",
+        verbose_name="Camion",
     )
     type_document = models.CharField(
         max_length=30,

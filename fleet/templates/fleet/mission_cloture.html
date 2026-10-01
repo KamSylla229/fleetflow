@@ -1,43 +1,53 @@
 {% extends "fleet/saisie_base.html" %}
+{% load humanize %}
 
 {% block avant %}
-<div class="card shadow-sm mb-3">
-  <div class="card-header fw-semibold">Mission à clôturer</div>
-  <div class="card-body">
-    <dl class="row mb-0">
-      <dt class="col-5">Trajet</dt>
-      <dd class="col-7">{{ mission.depart }} → {{ mission.destination }}</dd>
-
-      <dt class="col-5">Véhicule</dt>
-      <dd class="col-7">
-        <a href="{{ mission.vehicule.get_absolute_url }}">
-          {{ mission.vehicule.immatriculation }}
-        </a>
-      </dd>
-
-      <dt class="col-5">Chauffeur</dt>
-      <dd class="col-7">
-        <a href="{{ mission.chauffeur.get_absolute_url }}">
-          {{ mission.chauffeur.nom }}
-        </a>
-      </dd>
-
-      <dt class="col-5">Départ</dt>
-      <dd class="col-7">
-        le {{ mission.date_depart|date:"d/m/Y" }}, à {{ mission.km_depart }} km
-      </dd>
-
-      <dt class="col-5">Statut</dt>
-      <dd class="col-7">{{ mission.get_statut_display }}</dd>
+<div class="ff-carte mb-3">
+  <div class="ff-carte__entete">
+    <h2 class="ff-carte__titre">Mission à clôturer</h2>
+  </div>
+  <div class="ff-carte__corps">
+    <dl class="ff-donnees">
+      <div class="ff-donnees__ligne">
+        <dt class="ff-donnees__cle">Trajet</dt>
+        <dd class="ff-donnees__valeur">
+          {{ mission.depart }} → {{ mission.destination }}
+        </dd>
+      </div>
+      <div class="ff-donnees__ligne">
+        <dt class="ff-donnees__cle">Camion</dt>
+        <dd class="ff-donnees__valeur">
+          <a class="ff-chiffre" href="{{ mission.vehicule.get_absolute_url }}">
+            {{ mission.vehicule.immatriculation }}
+          </a>
+        </dd>
+      </div>
+      <div class="ff-donnees__ligne">
+        <dt class="ff-donnees__cle">Chauffeur</dt>
+        <dd class="ff-donnees__valeur">
+          <a href="{{ mission.chauffeur.get_absolute_url }}">{{ mission.chauffeur.nom }}</a>
+        </dd>
+      </div>
+      <div class="ff-donnees__ligne">
+        <dt class="ff-donnees__cle">Départ</dt>
+        <dd class="ff-donnees__valeur">
+          le <span class="ff-chiffre">{{ mission.date_depart|date:"d/m/Y" }}</span>,
+          à <span class="ff-chiffre">{{ mission.km_depart|intcomma }} km</span>
+        </dd>
+      </div>
+      <div class="ff-donnees__ligne">
+        <dt class="ff-donnees__cle">Statut</dt>
+        <dd class="ff-donnees__valeur">{{ mission.get_statut_display }}</dd>
+      </div>
     </dl>
   </div>
 </div>
 {% endblock %}
 
 {% block intro %}
-<p class="text-body-secondary small">
+<p class="ff-champ__aide mb-3">
   Le kilométrage d'arrivée doit dépasser celui du départ
-  ({{ mission.km_depart }} km). Il mettra à jour le compteur du véhicule.
+  ({{ mission.km_depart|intcomma }} km). Il mettra à jour le compteur du camion.
 </p>
 {% endblock %}
 

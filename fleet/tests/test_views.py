@@ -170,7 +170,7 @@ class VehiculeFicheTest(VueConnecteeTest):
             self.vehicule, Document.TypeDocument.VISITE_TECHNIQUE, jours=-10
         )
         reponse = self.client.get(self.vehicule.get_absolute_url())
-        self.assertContains(reponse, "bg-danger")
+        self.assertContains(reponse, "ff-badge--rouge")
         self.assertContains(reponse, "Expiré depuis 10 j")
 
     def test_une_piece_sans_echeance_reste_neutre(self):
@@ -292,7 +292,7 @@ class VehiculeEcritureTest(VueConnecteeTest):
         vehicule.refresh_from_db()
         self.assertTrue(vehicule.actif)
         self.assertContains(reponse, "est en mission")
-        self.assertContains(reponse, "alert-danger")
+        self.assertContains(reponse, "ff-bandeau--rouge")
 
 
 class ChauffeurVuesTest(VueConnecteeTest):
@@ -325,7 +325,7 @@ class ChauffeurVuesTest(VueConnecteeTest):
     def test_fiche_avertit_du_permis_expire(self):
         reponse = self.client.get(self.perime.get_absolute_url())
         self.assertContains(reponse, "Toute nouvelle")
-        self.assertContains(reponse, "alert-danger")
+        self.assertContains(reponse, "ff-bandeau--rouge")
 
     def test_creation(self):
         reponse = self.client.post(
@@ -395,7 +395,7 @@ class MissionVuesTest(VueConnecteeTest):
 
         # Pas de redirection : on reste sur le formulaire.
         self.assertEqual(reponse.status_code, 200)
-        self.assertContains(reponse, "alert-danger")
+        self.assertContains(reponse, "ff-bandeau--rouge")
         self.assertContains(reponse, "déjà engagé")
         # Les valeurs saisies sont conservées : rien à retaper.
         self.assertContains(reponse, "Bohicon")
@@ -436,7 +436,7 @@ class MissionVuesTest(VueConnecteeTest):
         )
 
         self.assertEqual(reponse.status_code, 200)
-        self.assertContains(reponse, "alert-danger")
+        self.assertContains(reponse, "ff-bandeau--rouge")
         mission.refresh_from_db()
         self.assertEqual(mission.statut, Mission.Statut.EN_COURS)
 
@@ -611,7 +611,7 @@ class EntretienVuesTest(VueConnecteeTest):
         )
         reponse = self.client.get(reverse("fleet:entretien_liste"))
         self.assertContains(reponse, "En retard de 1000 km")
-        self.assertContains(reponse, "bg-danger")
+        self.assertContains(reponse, "ff-badge--rouge")
 
     def test_badge_a_venir(self):
         Entretien.objects.create(
@@ -644,8 +644,8 @@ class DocumentVuesTest(VueConnecteeTest):
     def test_liste_avec_badges(self):
         reponse = self.client.get(reverse("fleet:document_liste"))
         self.assertContains(reponse, "Expiré depuis 15 j")
-        self.assertContains(reponse, "bg-danger")
-        self.assertContains(reponse, "bg-success")
+        self.assertContains(reponse, "ff-badge--rouge")
+        self.assertContains(reponse, "ff-badge--vert")
         self.assertContains(reponse, "Sans échéance")
 
     def test_filtre_sur_les_alertes(self):
@@ -655,14 +655,14 @@ class DocumentVuesTest(VueConnecteeTest):
         # dernier figure aussi dans la liste déroulante du filtre par type,
         # qui est affichée quels que soient les résultats.
         self.assertNotContains(reponse, "Sans échéance")
-        self.assertNotContains(reponse, "bg-success")
+        self.assertNotContains(reponse, "ff-badge--vert")
 
     def test_filtre_par_type(self):
         reponse = self.client.get(
             reverse("fleet:document_liste"),
             {"type": Document.TypeDocument.ASSURANCE},
         )
-        self.assertContains(reponse, "bg-success")
+        self.assertContains(reponse, "ff-badge--vert")
         self.assertNotContains(reponse, "Sans échéance")
         self.assertNotContains(reponse, "Expiré depuis 15 j")
 
@@ -708,7 +708,9 @@ class FicheVehiculeActiviteTest(VueConnecteeTest):
         self.assertContains(reponse, "10 dernières missions")
         self.assertContains(reponse, "Bohicon")
         self.assertContains(reponse, "10 derniers pleins")
-        self.assertContains(reponse, "28600")
+        # intcomma sépare les milliers par une espace insécable (U+00A0) en
+        # locale fr-fr : la page affiche « 28 600 » et non « 28600 ».
+        self.assertContains(reponse, "28\u00a0600")
         self.assertContains(reponse, "Vidange")
         self.assertContains(reponse, "À venir dans 5000 km")
 
@@ -856,5 +858,5 @@ class AffichageDesFormulairesTest(VueConnecteeTest):
                 "commentaire": "",
             },
         )
-        self.assertContains(reponse, "alert-danger")
+        self.assertContains(reponse, "ff-bandeau--rouge")
         self.assertContains(reponse, "en cours")

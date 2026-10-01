@@ -1,156 +1,175 @@
 {% extends "base.html" %}
+{% load humanize %}
 
 {% block titre %}{{ chauffeur.nom }} — FleetFlow{% endblock %}
+{% block titre_page %}{{ chauffeur.nom }}{% endblock %}
+{% block sous_titre %}
+  <span class="ff-chiffre">{{ chauffeur.telephone }}</span> ·
+  permis <span class="ff-chiffre">{{ chauffeur.numero_permis }}</span>
+{% endblock %}
 
-{% block entete %}
-<div class="d-flex justify-content-between align-items-start mb-3">
-  <div>
-    <h1 class="h3 mb-1">{{ chauffeur.nom }}</h1>
-    <p class="text-body-secondary mb-0">{{ chauffeur.telephone }}</p>
-  </div>
-  <div class="d-flex gap-2">
-    <a class="btn btn-outline-dark"
-       href="{% url 'fleet:chauffeur_modifier' chauffeur.pk %}">Modifier</a>
-    <form method="post" action="{% url 'fleet:chauffeur_activation' chauffeur.pk %}"
-          onsubmit="return confirm('Confirmer le changement pour {{ chauffeur.nom }} ?');">
-      {% csrf_token %}
-      {% if chauffeur.actif %}
-        <button type="submit" class="btn btn-outline-danger">Désactiver</button>
-      {% else %}
-        <button type="submit" class="btn btn-outline-success">Réactiver</button>
-      {% endif %}
-    </form>
-  </div>
-</div>
+{% block actions %}
+  <a class="ff-btn ff-btn--secondaire"
+     href="{% url 'fleet:chauffeur_modifier' chauffeur.pk %}">
+    <i class="bi bi-pencil" aria-hidden="true"></i> Modifier
+  </a>
+  <form method="post" action="{% url 'fleet:chauffeur_activation' chauffeur.pk %}"
+        onsubmit="return confirm('Confirmer le changement pour {{ chauffeur.nom }} ?');">
+    {% csrf_token %}
+    {% if chauffeur.actif %}
+      <button type="submit" class="ff-btn ff-btn--danger">Désactiver</button>
+    {% else %}
+      <button type="submit" class="ff-btn ff-btn--secondaire">Réactiver</button>
+    {% endif %}
+  </form>
 {% endblock %}
 
 {% block contenu %}
 
 {% if not chauffeur.actif %}
-  <div class="alert alert-secondary">
-    Ce chauffeur est désactivé : il ne peut plus recevoir de mission. Son
-    historique reste consultable.
+  <div class="ff-bandeau ff-bandeau--neutre">
+    <i class="bi bi-archive" aria-hidden="true"></i>
+    <span class="ff-bandeau__corps">
+      Ce chauffeur est désactivé : il ne peut plus recevoir de mission. Son
+      historique reste consultable.
+    </span>
   </div>
 {% endif %}
 
+{% comment %}
+  Le code du statut vient de services.ECHEANCE_EXPIREE. Comparer une chaîne
+  dans un gabarit est le point faible de ce bandeau : une divergence ne
+  lèverait aucune erreur. Noté au BACKLOG avec les autres valeurs en clair.
+{% endcomment %}
 {% if statut_permis.code == "expiree" %}
-  <div class="alert alert-danger">
-    Le permis de {{ chauffeur.nom }} a expiré le
-    {{ chauffeur.date_expiration_permis|date:"d/m/Y" }}. Toute nouvelle
-    affectation sera refusée.
+  <div class="ff-bandeau ff-bandeau--rouge">
+    <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
+    <span class="ff-bandeau__corps">
+      Le permis de <strong>{{ chauffeur.nom }}</strong> a expiré le
+      <span class="ff-chiffre">{{ chauffeur.date_expiration_permis|date:"d/m/Y" }}</span>.
+      Toute nouvelle affectation sera refusée.
+    </span>
   </div>
 {% endif %}
 
-<div class="row g-4">
+<div class="ff-grille ff-grille--5-7">
 
-  <div class="col-lg-5">
-    <div class="card shadow-sm h-100">
-      <div class="card-header fw-semibold">Identité</div>
-      <div class="card-body">
-        <dl class="row mb-0">
-          <dt class="col-6">Téléphone</dt>
-          <dd class="col-6">{{ chauffeur.telephone }}</dd>
-
-          <dt class="col-6">Numéro de permis</dt>
-          <dd class="col-6">{{ chauffeur.numero_permis }}</dd>
-
-          <dt class="col-6">Expiration</dt>
-          <dd class="col-6">
+  <div class="ff-carte">
+    <div class="ff-carte__entete">
+      <h2 class="ff-carte__titre">Identité</h2>
+    </div>
+    <div class="ff-carte__corps">
+      <dl class="ff-donnees">
+        <div class="ff-donnees__ligne">
+          <dt class="ff-donnees__cle">Activité</dt>
+          <dd class="ff-donnees__valeur">
+            {% include "partials/_badge.html" with statut=statut_activite only %}
+          </dd>
+        </div>
+        <div class="ff-donnees__ligne">
+          <dt class="ff-donnees__cle">Téléphone</dt>
+          <dd class="ff-donnees__valeur ff-chiffre">{{ chauffeur.telephone }}</dd>
+        </div>
+        <div class="ff-donnees__ligne">
+          <dt class="ff-donnees__cle">Numéro de permis</dt>
+          <dd class="ff-donnees__valeur ff-chiffre">{{ chauffeur.numero_permis }}</dd>
+        </div>
+        <div class="ff-donnees__ligne">
+          <dt class="ff-donnees__cle">Expiration</dt>
+          <dd class="ff-donnees__valeur ff-chiffre">
             {{ chauffeur.date_expiration_permis|date:"d/m/Y" }}
           </dd>
-
-          <dt class="col-6">État du permis</dt>
-          <dd class="col-6">
-            <span class="badge {{ statut_permis.classe_css }}">
-              {{ statut_permis.libelle }}
-            </span>
+        </div>
+        <div class="ff-donnees__ligne">
+          <dt class="ff-donnees__cle">État du permis</dt>
+          <dd class="ff-donnees__valeur">
+            {% include "partials/_badge.html" with statut=statut_permis only %}
           </dd>
-        </dl>
-      </div>
+        </div>
+      </dl>
     </div>
   </div>
 
-  <div class="col-lg-7">
-    <div class="card shadow-sm h-100">
-      <div class="card-header fw-semibold">Mission en cours</div>
-      <div class="card-body">
-        {% if mission_en_cours %}
-          <p class="mb-1 fw-semibold">
-            {{ mission_en_cours.depart }} → {{ mission_en_cours.destination }}
-          </p>
-          <p class="text-body-secondary small mb-0">
-            Avec
-            <a href="{{ mission_en_cours.vehicule.get_absolute_url }}">
-              {{ mission_en_cours.vehicule.immatriculation }}</a>,
-            depuis le {{ mission_en_cours.date_depart|date:"d/m/Y" }}.
-          </p>
-        {% else %}
-          <p class="text-body-secondary mb-0">
-            {{ chauffeur.nom }} n'est engagé sur aucune mission.
-          </p>
-        {% endif %}
-      </div>
+  <div class="ff-carte">
+    <div class="ff-carte__entete">
+      <h2 class="ff-carte__titre">Mission en cours</h2>
+      {% if mission_en_cours %}
+        <a class="ff-carte__lien"
+           href="{% url 'fleet:mission_cloturer' mission_en_cours.pk %}">Clôturer</a>
+      {% endif %}
+    </div>
+    <div class="ff-carte__corps">
+      {% if mission_en_cours %}
+        <p class="fs-5 fw-semibold mb-1">
+          {{ mission_en_cours.depart }} → {{ mission_en_cours.destination }}
+        </p>
+        <p class="ff-entete__sous-titre mb-0">
+          Avec
+          <a class="ff-chiffre" href="{{ mission_en_cours.vehicule.get_absolute_url }}">
+            {{ mission_en_cours.vehicule.immatriculation }}</a>,
+          depuis le
+          <span class="ff-chiffre">{{ mission_en_cours.date_depart|date:"d/m/Y" }}</span>.
+        </p>
+      {% else %}
+        <p class="text-body-secondary mb-0">
+          {{ chauffeur.nom }} n'est engagé sur aucune mission.
+        </p>
+      {% endif %}
     </div>
   </div>
 
-  {% block fiche_historique %}
-    <div class="col-12">
-      <div class="card shadow-sm">
-        <div class="card-header d-flex justify-content-between align-items-center">
-          <span class="fw-semibold">Historique des missions</span>
-          <a class="btn btn-sm btn-outline-secondary"
-             href="{% url 'fleet:mission_liste' %}?chauffeur={{ chauffeur.pk }}">
-            Tout voir
-          </a>
-        </div>
-        <div class="table-responsive">
-          <table class="table table-sm table-hover align-middle mb-0">
-            <thead class="table-light">
-              <tr>
-                <th>Départ</th>
-                <th>Trajet</th>
-                <th>Véhicule</th>
-                <th>Statut</th>
-                <th class="text-end">Distance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for mission in missions %}
-                <tr>
-                  <td>{{ mission.date_depart|date:"d/m/y" }}</td>
-                  <td>{{ mission.depart }} → {{ mission.destination }}</td>
-                  <td>
-                    <a href="{{ mission.vehicule.get_absolute_url }}">
-                      {{ mission.vehicule.immatriculation }}
-                    </a>
-                  </td>
-                  <td>{{ mission.get_statut_display }}</td>
-                  <td class="text-end">
-                    {% if mission.distance is not None %}
-                      {{ mission.distance }} km
-                    {% else %}
-                      <span class="text-body-secondary">—</span>
-                    {% endif %}
-                  </td>
-                </tr>
-              {% empty %}
-                <tr>
-                  <td colspan="5" class="text-center text-body-secondary py-3">
-                    Ce chauffeur n'a encore aucune mission enregistrée.
-                  </td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        <div class="card-footer small text-body-secondary">
-          Les vingt dernières missions. L'historique complet est accessible
-          depuis la liste des missions.
-        </div>
-      </div>
-    </div>
-  {% endblock %}
+</div>
 
+<div class="ff-carte mt-4">
+  <div class="ff-carte__entete">
+    <h2 class="ff-carte__titre">Historique des missions</h2>
+    <a class="ff-carte__lien"
+       href="{% url 'fleet:mission_liste' %}?chauffeur={{ chauffeur.pk }}">Tout voir</a>
+  </div>
+  <div class="ff-tableau-cadre">
+    <table class="ff-tableau">
+      <thead>
+        <tr>
+          <th>Départ</th>
+          <th>Trajet</th>
+          <th>Camion</th>
+          <th>Statut</th>
+          <th class="ff-droite">Distance</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for mission in missions %}
+          <tr>
+            <td class="ff-chiffre">{{ mission.date_depart|date:"d/m/y" }}</td>
+            <td>{{ mission.depart }} → {{ mission.destination }}</td>
+            <td>
+              <a class="ff-chiffre" href="{{ mission.vehicule.get_absolute_url }}">
+                {{ mission.vehicule.immatriculation }}
+              </a>
+            </td>
+            <td>{{ mission.get_statut_display }}</td>
+            <td class="ff-droite">
+              {% if mission.distance is not None %}
+                <span class="ff-chiffre">{{ mission.distance|intcomma }} km</span>
+              {% else %}
+                <span class="text-body-tertiary">—</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="5" class="ff-tableau__vide">
+              Ce chauffeur n'a encore aucune mission enregistrée.
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="ff-carte__pied">
+    Les vingt dernières missions. L'historique complet est accessible depuis la
+    liste des missions.
+  </div>
 </div>
 
 {% endblock %}

@@ -1,0 +1,783 @@
+/* ==========================================================================
+   FleetFlow — thème maison
+   ==========================================================================
+
+   Bootstrap 5 reste la base (grille, offcanvas, utilitaires). Ce fichier est
+   chargé APRÈS lui et le surcharge. Aucun style n'est écrit en ligne dans les
+   gabarits : tout passe par les classes définies ici.
+
+   Les classes du thème sont préfixées « ff- » pour qu'on voie d'un coup d'œil
+   ce qui vient de FleetFlow et ce qui vient de Bootstrap. Les surcharges de
+   classes Bootstrap (form-control, pagination…) sont regroupées à la fin.
+
+   Référence visuelle : docs/maquette/ (7 captures).
+   ========================================================================== */
+
+/* --- 1. Jetons de design -------------------------------------------------
+   Une seule source de vérité pour les couleurs, les rayons et les polices.
+   Changer une valeur ici la change partout : c'est l'équivalent, côté style,
+   de ce que services.py est pour les règles métier. */
+
+:root {
+  --ff-fond:            #F1F3EE;
+  --ff-surface:         #FFFFFF;
+  --ff-surface-basse:   #FBFCFA;
+  --ff-bordure:         #E4E8E1;
+  --ff-bordure-douce:   #EDF0EA;
+  --ff-encre:           #0F1A14;
+  --ff-encre-2:         #5C6660;
+  --ff-encre-3:         #909993;
+  --ff-nuit:            #0E2318;
+  --ff-marque:          #C1592F;
+
+  --ff-vert:            #1B7A4B;
+  --ff-vert-texte:      #115434;
+  --ff-vert-fond:       #E7F1E9;
+  --ff-vert-bord:       #B4D6C1;
+
+  --ff-ambre-texte:     #8F5A12;
+  --ff-ambre-fond:      #FAF0DD;
+
+  --ff-rouge-texte:     #B3322C;
+  --ff-rouge-fond:      #FBEDEC;
+  --ff-rouge-bord:      #F0D2CF;
+
+  --ff-neutre-fond:     #EEF0EC;
+
+  --ff-rayon-carte:     12px;
+  --ff-rayon-bouton:    8px;
+  --ff-rayon-pastille:  999px;
+
+  --ff-texte:   "Instrument Sans", "Segoe UI", system-ui, sans-serif;
+  --ff-chiffre: "IBM Plex Mono", Consolas, monospace;
+
+  --ff-sidebar: 222px;
+}
+
+/* --- 2. Base -------------------------------------------------------------- */
+
+body {
+  background: var(--ff-fond);
+  color: var(--ff-encre);
+  font-family: var(--ff-texte);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--ff-vert); text-decoration: none; }
+a:hover { color: var(--ff-vert-texte); text-decoration: underline; }
+
+/* Le focus doit rester visible : c'est la seule façon de se repérer au
+   clavier. On le dessine nous-mêmes plutôt que de laisser le halo du
+   navigateur, qui jure avec le reste. */
+a:focus-visible,
+button:focus-visible,
+.ff-nav__item:focus-visible,
+[type="submit"]:focus-visible {
+  outline: 2px solid var(--ff-vert);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Classe utilitaire : tout ce qui est chiffre, code ou immatriculation.
+   Les tableaux de flotte se lisent en colonne, donc les chiffres doivent
+   s'aligner — c'est le rôle de tabular-nums. */
+.ff-chiffre {
+  font-family: var(--ff-chiffre);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* --- 3. Ossature : sidebar + zone principale ----------------------------- */
+
+.ff-app { display: flex; min-height: 100vh; }
+
+.ff-sidebar {
+  width: var(--ff-sidebar);
+  flex: 0 0 var(--ff-sidebar);
+  background: var(--ff-surface);
+  border-right: 1px solid var(--ff-bordure);
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.ff-main {
+  flex: 1 1 auto;
+  min-width: 0;            /* sans ça, un tableau large pousse la sidebar */
+  padding: 30px;
+  background: var(--ff-fond);
+}
+
+/* --- 4. Logo et identité ------------------------------------------------- */
+
+.ff-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 16px;
+  text-decoration: none;
+}
+.ff-logo:hover { text-decoration: none; }
+
+.ff-logo__carre {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border-radius: 8px;
+  background: var(--ff-marque);
+  color: #fff;
+  font-weight: 700;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ff-logo__nom {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ff-encre);
+  line-height: 1.2;
+  display: block;
+}
+
+.ff-logo__client {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ff-encre-3);
+  display: block;
+}
+
+/* --- 5. Navigation ------------------------------------------------------- */
+
+.ff-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 12px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+}
+
+.ff-nav__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: var(--ff-rayon-bouton);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ff-encre-2);
+  text-decoration: none;
+}
+.ff-nav__item:hover {
+  background: var(--ff-neutre-fond);
+  color: var(--ff-encre);
+  text-decoration: none;
+}
+
+.ff-nav__item i { font-size: 16px; line-height: 1; }
+
+.ff-nav__item--actif,
+.ff-nav__item--actif:hover {
+  background: var(--ff-nuit);
+  color: #fff;
+}
+
+/* Entrée dont la page n'existe pas encore : visible pour montrer la
+   structure de l'application, mais non cliquable. Un <span>, pas un <a>
+   désactivé : il ne doit pas être atteignable au clavier. */
+.ff-nav__item--bientot {
+  color: var(--ff-encre-3);
+  cursor: default;
+  justify-content: space-between;
+}
+.ff-nav__item--bientot:hover { background: transparent; color: var(--ff-encre-3); }
+
+.ff-nav__bientot {
+  /* Volontairement discrete : dans 222 px de sidebar, « Fournisseurs GPS »
+     plus une pastille passaient sur deux lignes. */
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--ff-neutre-fond);
+  color: var(--ff-encre-3);
+  padding: 1px 5px;
+  border-radius: var(--ff-rayon-pastille);
+  flex: 0 0 auto;
+}
+
+.ff-nav__libelle { flex: 1 1 auto; }
+
+/* --- 6. Pied de sidebar : utilisateur connecté --------------------------- */
+
+.ff-utilisateur {
+  border-top: 1px solid var(--ff-bordure);
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ff-pastille-initiales {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 50%;
+  background: var(--ff-vert-fond);
+  color: var(--ff-vert-texte);
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ff-utilisateur__nom {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ff-encre);
+  display: block;
+  line-height: 1.25;
+}
+
+.ff-utilisateur__role {
+  font-size: 12px;
+  color: var(--ff-encre-3);
+  display: block;
+}
+
+.ff-deconnexion {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 12px;
+  color: var(--ff-encre-3);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.ff-deconnexion:hover { color: var(--ff-rouge-texte); }
+
+/* --- 7. En-tête de page -------------------------------------------------- */
+
+.ff-entete {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+
+.ff-entete__titre {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 4px;
+  color: var(--ff-encre);
+}
+
+.ff-entete__sous-titre {
+  font-size: 13px;
+  color: var(--ff-encre-3);
+  margin: 0;
+}
+
+.ff-entete__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* --- 8. Cartes ----------------------------------------------------------- */
+
+.ff-carte {
+  background: var(--ff-surface);
+  border: 1px solid var(--ff-bordure);
+  border-radius: var(--ff-rayon-carte);
+  /* Aucune ombre : la maquette sépare les blocs par le trait, pas par le
+     relief. Une ombre suffirait à faire « pas tout à fait pareil ». */
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.ff-carte__entete {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--ff-bordure);
+}
+
+.ff-carte__titre { font-size: 15px; font-weight: 600; margin: 0; }
+
+.ff-carte__lien { font-size: 13px; color: var(--ff-vert); font-weight: 500; }
+
+.ff-carte__corps { padding: 18px; }
+
+.ff-carte__pied {
+  padding: 12px 18px;
+  border-top: 1px solid var(--ff-bordure);
+  background: var(--ff-surface-basse);
+  font-size: 12px;
+  color: var(--ff-encre-3);
+}
+
+/* --- 9. Cartes d'indicateur (KPI) --------------------------------------- */
+
+.ff-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 16px;
+}
+
+.ff-kpi {
+  background: var(--ff-surface);
+  border: 1px solid var(--ff-bordure);
+  border-radius: var(--ff-rayon-carte);
+  padding: 16px 18px;
+}
+
+.ff-kpi__libelle {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--ff-encre-2);
+  margin: 0 0 8px;
+}
+
+.ff-kpi__valeur {
+  font-family: var(--ff-chiffre);
+  font-variant-numeric: tabular-nums;
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--ff-encre);
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.ff-kpi__unite {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ff-encre-2);
+}
+
+.ff-kpi__aide {
+  font-size: 12px;
+  color: var(--ff-encre-3);
+  margin: 8px 0 0;
+}
+
+.ff-kpi--avant {
+  background: var(--ff-vert-fond);
+  border-color: var(--ff-vert-bord);
+}
+.ff-kpi--avant .ff-kpi__valeur { color: var(--ff-vert-texte); }
+.ff-kpi--avant .ff-kpi__libelle { color: var(--ff-vert-texte); }
+
+.ff-kpi--alerte .ff-kpi__valeur { color: var(--ff-rouge-texte); }
+
+/* --- 10. Tableaux -------------------------------------------------------- */
+
+/* Le conteneur porte le cadre et le défilement horizontal : sur mobile, le
+   tableau glisse DANS son cadre au lieu de pousser la page entière. */
+.ff-tableau-cadre {
+  background: var(--ff-surface);
+  border: 1px solid var(--ff-bordure);
+  border-radius: var(--ff-rayon-carte);
+  overflow-x: auto;
+}
+.ff-carte > .ff-tableau-cadre { border: 0; border-radius: 0; }
+
+.ff-tableau { width: 100%; border-collapse: collapse; margin: 0; }
+
+.ff-tableau thead th {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--ff-encre-2);
+  background: var(--ff-surface-basse);
+  text-align: left;
+  padding: 11px 18px;
+  border-bottom: 1px solid var(--ff-bordure);
+  white-space: nowrap;
+}
+
+.ff-tableau tbody td {
+  font-size: 14px;
+  padding: 13px 18px;
+  height: 46px;
+  border-bottom: 1px solid var(--ff-bordure-douce);
+  vertical-align: middle;
+}
+
+.ff-tableau tbody tr:last-child td { border-bottom: 0; }
+.ff-tableau tbody tr:hover td { background: var(--ff-surface-basse); }
+
+.ff-tableau .ff-droite,
+.ff-tableau th.ff-droite { text-align: right; }
+
+.ff-tableau__vide {
+  text-align: center;
+  color: var(--ff-encre-3);
+  padding: 34px 18px;
+}
+
+/* Ligne de total : fond bas et gras, pour qu'on la distingue d'une ligne
+   de données sans avoir à lire le libellé. */
+.ff-tableau tfoot td,
+.ff-tableau .ff-total td {
+  background: var(--ff-surface-basse);
+  font-weight: 700;
+  border-top: 1px solid var(--ff-bordure);
+  border-bottom: 0;
+}
+
+.ff-sous-ligne {
+  display: block;
+  font-size: 12px;
+  color: var(--ff-encre-3);
+}
+
+/* --- 11. Pastilles de statut -------------------------------------------- */
+
+/* Un seul composant, quatre tons. Le gabarit partials/badge.html est le seul
+   endroit qui choisit le ton : aucune page ne décide d'une couleur. */
+.ff-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: var(--ff-rayon-pastille);
+  white-space: nowrap;
+}
+
+.ff-badge::before {
+  content: "\2022";          /* le point devant le libellé */
+  font-size: 13px;
+  line-height: 1;
+}
+
+.ff-badge--vert   { background: var(--ff-vert-fond);   color: var(--ff-vert-texte); }
+.ff-badge--ambre  { background: var(--ff-ambre-fond);  color: var(--ff-ambre-texte); }
+.ff-badge--rouge  { background: var(--ff-rouge-fond);  color: var(--ff-rouge-texte); }
+.ff-badge--neutre { background: var(--ff-neutre-fond); color: var(--ff-encre-2); }
+
+/* --- 12. Bandeaux (alertes et messages) --------------------------------- */
+
+.ff-bandeau {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 13px 16px;
+  border-radius: var(--ff-rayon-bouton);
+  border: 1px solid transparent;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.ff-bandeau i { font-size: 16px; line-height: 1.3; flex: 0 0 auto; }
+.ff-bandeau__corps { flex: 1 1 auto; }
+.ff-bandeau strong { font-weight: 700; }
+
+.ff-bandeau--rouge {
+  background: var(--ff-rouge-fond);
+  border-color: var(--ff-rouge-bord);
+  color: var(--ff-rouge-texte);
+}
+.ff-bandeau--vert {
+  background: var(--ff-vert-fond);
+  border-color: var(--ff-vert-bord);
+  color: var(--ff-vert-texte);
+}
+.ff-bandeau--ambre {
+  background: var(--ff-ambre-fond);
+  border-color: #EAD9B4;
+  color: var(--ff-ambre-texte);
+}
+.ff-bandeau--neutre {
+  background: var(--ff-neutre-fond);
+  border-color: var(--ff-bordure);
+  color: var(--ff-encre-2);
+}
+
+.ff-bandeau__fermer {
+  background: none;
+  border: 0;
+  color: inherit;
+  opacity: 0.55;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+}
+.ff-bandeau__fermer:hover { opacity: 1; }
+
+/* --- 13. Boutons -------------------------------------------------------- */
+
+.ff-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--ff-texte);
+  font-size: 14px;
+  font-weight: 500;
+  padding: 9px 15px;
+  border-radius: var(--ff-rayon-bouton);
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+  line-height: 1.2;
+}
+.ff-btn:hover { text-decoration: none; }
+
+.ff-btn--principal { background: var(--ff-nuit); color: #fff; }
+.ff-btn--principal:hover { background: #163A27; color: #fff; }
+
+.ff-btn--secondaire {
+  background: var(--ff-surface);
+  border-color: var(--ff-bordure);
+  color: var(--ff-encre);
+}
+.ff-btn--secondaire:hover { background: var(--ff-surface-basse); color: var(--ff-encre); }
+
+.ff-btn--danger {
+  background: var(--ff-surface);
+  border-color: var(--ff-rouge-bord);
+  color: var(--ff-rouge-texte);
+}
+.ff-btn--danger:hover { background: var(--ff-rouge-fond); color: var(--ff-rouge-texte); }
+
+.ff-btn--petit { font-size: 13px; padding: 6px 11px; }
+
+/* --- 14. Filtres -------------------------------------------------------- */
+
+.ff-filtres {
+  background: var(--ff-surface);
+  border: 1px solid var(--ff-bordure);
+  border-radius: var(--ff-rayon-carte);
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+
+.ff-filtres__grille {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.ff-filtres__actions { display: flex; gap: 8px; }
+
+.ff-etiquette {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ff-encre-2);
+  margin-bottom: 5px;
+}
+
+/* --- 15. Formulaires ---------------------------------------------------- */
+
+.ff-champ { margin-bottom: 16px; }
+
+.ff-champ__etiquette {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ff-encre);
+  margin-bottom: 5px;
+}
+
+.ff-champ__requis { color: var(--ff-rouge-texte); }
+
+.ff-champ__aide {
+  font-size: 12px;
+  color: var(--ff-encre-3);
+  margin-top: 5px;
+}
+
+.ff-champ__erreur {
+  font-size: 12px;
+  color: var(--ff-rouge-texte);
+  margin-top: 5px;
+}
+
+.ff-formulaire-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+/* --- 16. Page de connexion ---------------------------------------------- */
+
+.ff-connexion {
+  min-height: 100vh;
+  background: var(--ff-fond);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+}
+
+.ff-connexion__boite { width: 100%; max-width: 380px; }
+
+.ff-connexion__logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+/* --- 17. Listes clé / valeur (fiches) ---------------------------------- */
+
+.ff-donnees { margin: 0; }
+
+.ff-donnees__ligne {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--ff-bordure-douce);
+}
+.ff-donnees__ligne:first-child { padding-top: 0; }
+.ff-donnees__ligne:last-child { border-bottom: 0; padding-bottom: 0; }
+
+.ff-donnees__cle { font-size: 13px; color: var(--ff-encre-2); }
+.ff-donnees__valeur { font-size: 14px; font-weight: 500; text-align: right; }
+
+/* --- 18. Grilles de page ------------------------------------------------ */
+
+.ff-grille { display: grid; gap: 16px; }
+.ff-grille--2 { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.ff-grille--5-7 { grid-template-columns: 5fr 7fr; }
+.ff-pile { display: flex; flex-direction: column; gap: 16px; }
+
+@media (max-width: 991px) {
+  .ff-grille--5-7 { grid-template-columns: 1fr; }
+}
+
+/* --- 19. Barre mobile --------------------------------------------------- */
+
+.ff-barre-mobile {
+  display: none;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--ff-surface);
+  border-bottom: 1px solid var(--ff-bordure);
+  position: sticky;
+  top: 0;
+  z-index: 1020;
+}
+
+.ff-hamburger {
+  background: none;
+  border: 1px solid var(--ff-bordure);
+  border-radius: var(--ff-rayon-bouton);
+  padding: 6px 9px;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--ff-encre);
+}
+
+@media (max-width: 991px) {
+  .ff-sidebar { display: none; }
+  .ff-barre-mobile { display: flex; }
+  .ff-main { padding: 18px 16px; }
+  .ff-entete__titre { font-size: 22px; }
+}
+
+@media (max-width: 575px) {
+  /* Sous 576 px, le titre et son bouton d'action se disputent la largeur :
+     on les empile plutot que de les serrer. */
+  .ff-entete { flex-direction: column; align-items: stretch; gap: 12px; }
+  .ff-entete__actions .ff-btn { flex: 1 1 auto; justify-content: center; }
+}
+
+/* L'offcanvas Bootstrap reçoit la même sidebar : un seul gabarit de menu,
+   deux emplacements. */
+.offcanvas .ff-sidebar {
+  display: flex;
+  width: 100%;
+  flex: 1 1 auto;
+  border-right: 0;
+  height: auto;
+  position: static;
+}
+
+/* --- 20. Surcharges Bootstrap ------------------------------------------- */
+/* Les gabarits de formulaire reçoivent « form-control » et « form-select »
+   depuis MiseEnFormeBootstrapMixin (fleet/forms.py). On aligne donc ces
+   classes sur le thème au lieu de les remplacer : un seul endroit à changer
+   si Bootstrap évolue. */
+
+.form-control,
+.form-select {
+  font-family: var(--ff-texte);
+  font-size: 14px;
+  border-radius: var(--ff-rayon-bouton);
+  border-color: var(--ff-bordure);
+  color: var(--ff-encre);
+  padding: 8px 11px;
+}
+
+.form-control:focus,
+.form-select:focus {
+  border-color: var(--ff-vert);
+  box-shadow: 0 0 0 3px rgba(27, 122, 75, 0.14);
+}
+
+.form-control::placeholder { color: var(--ff-encre-3); }
+
+textarea.form-control { min-height: 68px; }
+
+.pagination { margin: 0; gap: 4px; }
+
+.page-link {
+  font-size: 13px;
+  border-radius: var(--ff-rayon-bouton);
+  border-color: var(--ff-bordure);
+  color: var(--ff-encre-2);
+}
+.page-link:hover { background: var(--ff-neutre-fond); color: var(--ff-encre); }
+
+.page-item.active .page-link {
+  background: var(--ff-nuit);
+  border-color: var(--ff-nuit);
+  color: #fff;
+}
+.page-item.disabled .page-link { color: var(--ff-encre-3); background: var(--ff-surface); }
+
+.ff-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.ff-pagination__compte { font-size: 12px; color: var(--ff-encre-3); margin: 0; }
+
+/* --- 21. Impression ---------------------------------------------------- */
+
+@media print {
+  .ff-sidebar, .ff-barre-mobile, .ff-entete__actions, .ff-filtres { display: none; }
+  .ff-main { padding: 0; }
+  body { background: #fff; }
+}

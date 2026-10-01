@@ -1,21 +1,25 @@
 {% extends "base.html" %}
+{% load humanize %}
 
 {% block titre %}Carburant — FleetFlow{% endblock %}
+{% block titre_page %}Pleins de carburant{% endblock %}
+{% block sous_titre %}
+  {{ page_obj.paginator.count }} plein{{ page_obj.paginator.count|pluralize }} ·
+  consommation calculée entre deux passages à la pompe
+{% endblock %}
 
-{% block entete %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h1 class="h3 mb-0">Pleins de carburant</h1>
-  <a class="btn btn-dark" href="{% url 'fleet:plein_creer' %}">Nouveau plein</a>
-</div>
+{% block actions %}
+  <a class="ff-btn ff-btn--principal" href="{% url 'fleet:plein_creer' %}">
+    <i class="bi bi-plus-lg" aria-hidden="true"></i> Nouveau plein
+  </a>
 {% endblock %}
 
 {% block contenu %}
 
-<form method="get" class="card card-body shadow-sm mb-3">
-  <div class="row g-2 align-items-end">
-
-    <div class="col-md-4">
-      <label for="vehicule" class="form-label small mb-1">Véhicule</label>
+<form method="get" class="ff-filtres">
+  <div class="ff-filtres__grille">
+    <div>
+      <label class="ff-etiquette" for="vehicule">Camion</label>
       <select id="vehicule" name="vehicule" class="form-select">
         <option value="">Tous</option>
         {% for vehicule in vehicules %}
@@ -26,76 +30,72 @@
         {% endfor %}
       </select>
     </div>
-
     {% include "partials/_filtre_periode.html" %}
-
-    <div class="col-md-4 d-flex gap-2">
-      <button type="submit" class="btn btn-secondary">Filtrer</button>
-      <a href="{% url 'fleet:plein_liste' %}" class="btn btn-outline-secondary">
-        Réinitialiser
+    <div class="ff-filtres__actions">
+      <button type="submit" class="ff-btn ff-btn--secondaire">
+        <i class="bi bi-funnel" aria-hidden="true"></i> Filtrer
+      </button>
+      <a href="{% url 'fleet:plein_liste' %}" class="ff-btn ff-btn--secondaire"
+         title="Réinitialiser les filtres">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
       </a>
     </div>
-
   </div>
 </form>
 
-<div class="card shadow-sm">
-  <div class="table-responsive">
-    <table class="table table-hover align-middle mb-0">
-      <thead class="table-light">
+<div class="ff-tableau-cadre">
+  <table class="ff-tableau">
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Camion</th>
+        <th>Chauffeur</th>
+        <th class="ff-droite">Litres</th>
+        <th class="ff-droite">Prix / L</th>
+        <th class="ff-droite">Coût</th>
+        <th class="ff-droite">Compteur</th>
+        <th class="ff-droite">L / 100 km</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for plein in pleins %}
         <tr>
-          <th>Date</th>
-          <th>Véhicule</th>
-          <th>Chauffeur</th>
-          <th class="text-end">Litres</th>
-          <th class="text-end">Prix/L</th>
-          <th class="text-end">Coût</th>
-          <th class="text-end">Compteur</th>
-          <th class="text-end">Consommation</th>
+          <td class="ff-chiffre">{{ plein.date|date:"d/m/Y" }}</td>
+          <td>
+            <a class="ff-chiffre" href="{{ plein.vehicule.get_absolute_url }}">
+              {{ plein.vehicule.immatriculation }}
+            </a>
+          </td>
+          <td>{{ plein.chauffeur.nom }}</td>
+          <td class="ff-droite ff-chiffre">{{ plein.litres }}</td>
+          <td class="ff-droite ff-chiffre">{{ plein.prix_litre|floatformat:0 }}</td>
+          {# cout_total est une propriété du modèle : aucun calcul ici, et la
+             multiplication reste en Decimal. #}
+          <td class="ff-droite ff-chiffre">{{ plein.cout_total|floatformat:0|intcomma }} F</td>
+          <td class="ff-droite ff-chiffre">{{ plein.km_compteur|intcomma }}</td>
+          <td class="ff-droite">
+            {% comment %}
+              consommation est attachée par services.annoter_consommations().
+              Elle vaut None pour le premier plein d'un camion : il n'y a pas
+              de distance parcourue à laquelle rapporter le volume.
+            {% endcomment %}
+            {% if plein.consommation is not None %}
+              <span class="ff-chiffre fw-medium">{{ plein.consommation }}</span>
+            {% else %}
+              <span class="text-body-tertiary"
+                    title="Premier plein connu pour ce camion">—</span>
+            {% endif %}
+          </td>
         </tr>
-      </thead>
-      <tbody>
-        {% for plein in pleins %}
-          <tr>
-            <td>{{ plein.date|date:"d/m/Y" }}</td>
-            <td>
-              <a href="{{ plein.vehicule.get_absolute_url }}">
-                {{ plein.vehicule.immatriculation }}
-              </a>
-            </td>
-            <td>{{ plein.chauffeur.nom }}</td>
-            <td class="text-end">{{ plein.litres }} L</td>
-            <td class="text-end">{{ plein.prix_litre }}</td>
-            {# cout_total est une propriété du modèle : le gabarit n'a aucun
-               calcul à faire, et la multiplication reste en Decimal. #}
-            <td class="text-end">{{ plein.cout_total|floatformat:0 }} FCFA</td>
-            <td class="text-end">{{ plein.km_compteur }} km</td>
-            <td class="text-end">
-              {% comment %}
-                consommation est attachée par services.annoter_consommations().
-                Elle vaut None pour le premier plein d'un véhicule : il n'y a
-                pas de distance parcourue à laquelle rapporter le volume.
-              {% endcomment %}
-              {% if plein.consommation is not None %}
-                <span class="fw-semibold">{{ plein.consommation }}</span>
-                <span class="text-body-secondary small">L/100 km</span>
-              {% else %}
-                <span class="text-body-secondary" title="Premier plein connu pour ce véhicule">
-                  —
-                </span>
-              {% endif %}
-            </td>
-          </tr>
-        {% empty %}
-          <tr>
-            <td colspan="8" class="text-center text-body-secondary py-4">
-              Aucun plein ne correspond à ces critères.
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+      {% empty %}
+        <tr>
+          <td colspan="8" class="ff-tableau__vide">
+            Aucun plein ne correspond à ces critères.
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </div>
 
 {% include "partials/_pagination.html" %}

@@ -1,0 +1,31 @@
+{% load static %}{% comment %}
+  Gabarit des pages accessibles sans être connecté : pour l'instant, la seule
+  page de connexion. Pas de sidebar, pas de menu, pas de bloc de messages
+  d'application — une carte centrée sur le fond de l'application.
+
+  Deux gabarits de base plutôt qu'un seul avec un {% if user.is_authenticated %} :
+  les deux ossatures n'ont rien en commun sauf le <head>, qui est justement
+  dans partials/_tete.html.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <title>{% block titre %}FleetFlow{% endblock %}</title>
+  {% include "partials/_tete.html" %}
+</head>
+<body>
+  <div class="ff-connexion">
+    <div class="ff-connexion__boite">
+      <div class="ff-connexion__logo">
+        <span class="ff-logo__carre" aria-hidden="true">F</span>
+        <span>
+          <span class="ff-logo__nom">FleetFlow</span>
+          <span class="ff-logo__client">Démo Transport</span>
+        </span>
+      </div>
+      {% block contenu %}{% endblock %}
+    </div>
+  </div>
+  <script src="{% static 'vendor/bootstrap/bootstrap.bundle.min.js' %}"></script>
+</body>
+</html>

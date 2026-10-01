@@ -1,0 +1,19 @@
+{% comment %}
+  La pastille de statut, et le SEUL endroit du projet qui traduit un état en
+  classe de couleur. Deux façons de l'appeler :
+
+    {% include "partials/_badge.html" with statut=document.statut only %}
+    {% include "partials/_badge.html" with ton="vert" libelle="En route" only %}
+
+  Le « only » est important : sans lui, l'include hérite de tout le contexte
+  de la page, et une variable `statut` laissée par une boucle précédente
+  afficherait le mauvais badge sans la moindre erreur.
+
+  Le ton vient de services.py (vert / ambre / rouge / neutre). Un gabarit ne
+  décide jamais qu'un état est inquiétant.
+{% endcomment %}
+{% if statut %}
+  <span class="ff-badge ff-badge--{{ statut.ton }}">{{ statut.libelle }}</span>
+{% else %}
+  <span class="ff-badge ff-badge--{{ ton|default:'neutre' }}">{{ libelle }}</span>
+{% endif %}

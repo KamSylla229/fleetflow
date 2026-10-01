@@ -1,14 +1,29 @@
 {% extends "base.html" %}
+{% load humanize %}
 
-{% block titre %}Véhicules — FleetFlow{% endblock %}
+{% comment %}
+  La liste des camions — la page de référence du thème, calquée sur
+  docs/maquette/03-camions.png : un tableau, puis quatre indicateurs.
 
-{% block entete %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h1 class="h3 mb-0">Véhicules</h1>
-  <a class="btn btn-dark" href="{% url 'fleet:vehicule_creer' %}">
-    Nouveau véhicule
+  La colonne « Fournisseur » de la maquette attend le modèle FournisseurGPS
+  (phase suivante) ; en attendant, la dernière colonne porte l'état de
+  l'assurance, qui est l'information la plus utile dont on dispose.
+
+  Tous les chiffres sont calculés dans services.py : ce gabarit n'additionne
+  rien.
+{% endcomment %}
+
+{% block titre %}Camions — FleetFlow{% endblock %}
+{% block titre_page %}Camions{% endblock %}
+{% block sous_titre %}
+  {{ indicateurs.total }} véhicule{{ indicateurs.total|pluralize }} ·
+  {{ indicateurs.en_service }} en service
+{% endblock %}
+
+{% block actions %}
+  <a class="ff-btn ff-btn--principal" href="{% url 'fleet:vehicule_creer' %}">
+    <i class="bi bi-plus-lg" aria-hidden="true"></i> Ajouter un camion
   </a>
-</div>
 {% endblock %}
 
 {% block contenu %}
@@ -16,113 +31,127 @@
 {% comment %}
   Le formulaire de filtres est en GET et non en POST : les critères se
   retrouvent dans l'adresse, donc la page filtrée peut être mise en favori,
-  partagée à un collègue, et le bouton « précédent » du navigateur fonctionne.
+  envoyée à un collègue, et le bouton « précédent » du navigateur fonctionne.
 {% endcomment %}
-<form method="get" class="card card-body shadow-sm mb-3">
-  <div class="row g-2 align-items-end">
-
-    <div class="col-md-4">
-      <label for="recherche" class="form-label small mb-1">Recherche</label>
+<form method="get" class="ff-filtres">
+  <div class="ff-filtres__grille">
+    <div>
+      <label class="ff-etiquette" for="recherche">Recherche</label>
       <input type="search" id="recherche" name="q" value="{{ recherche }}"
              class="form-control" placeholder="Plaque, marque ou modèle">
     </div>
-
-    <div class="col-md-3">
-      <label for="statut" class="form-label small mb-1">Statut</label>
+    <div>
+      <label class="ff-etiquette" for="statut">Statut</label>
       <select id="statut" name="statut" class="form-select">
         <option value="">Tous les statuts</option>
         {% for valeur, libelle in statuts %}
-          <option value="{{ valeur }}"
-                  {% if valeur == statut_choisi %}selected{% endif %}>
+          <option value="{{ valeur }}" {% if valeur == statut_choisi %}selected{% endif %}>
             {{ libelle }}
           </option>
         {% endfor %}
       </select>
     </div>
-
-    <div class="col-md-3">
-      <label for="actif" class="form-label small mb-1">Flotte</label>
+    <div>
+      <label class="ff-etiquette" for="actif">Flotte</label>
       <select id="actif" name="actif" class="form-select">
-        <option value="1" {% if actif_choisi == "1" %}selected{% endif %}>
-          Flotte active
-        </option>
-        <option value="0" {% if actif_choisi == "0" %}selected{% endif %}>
-          Véhicules sortis
-        </option>
-        <option value="tous" {% if actif_choisi == "tous" %}selected{% endif %}>
-          Tous
-        </option>
+        <option value="1" {% if actif_choisi == "1" %}selected{% endif %}>Flotte active</option>
+        <option value="0" {% if actif_choisi == "0" %}selected{% endif %}>Camions sortis</option>
+        <option value="tous" {% if actif_choisi == "tous" %}selected{% endif %}>Tous</option>
       </select>
     </div>
-
-    <div class="col-md-2 d-flex gap-2">
-      <button type="submit" class="btn btn-secondary w-100">Filtrer</button>
-      <a href="{% url 'fleet:vehicule_liste' %}" class="btn btn-outline-secondary"
-         title="Réinitialiser les filtres">×</a>
+    <div class="ff-filtres__actions">
+      <button type="submit" class="ff-btn ff-btn--secondaire">
+        <i class="bi bi-funnel" aria-hidden="true"></i> Filtrer
+      </button>
+      <a href="{% url 'fleet:vehicule_liste' %}" class="ff-btn ff-btn--secondaire"
+         title="Réinitialiser les filtres">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
+      </a>
     </div>
-
   </div>
 </form>
 
-<div class="card shadow-sm">
-  <div class="table-responsive">
-    <table class="table table-hover align-middle mb-0">
-      <thead class="table-light">
+<div class="ff-tableau-cadre">
+  <table class="ff-tableau">
+    <thead>
+      <tr>
+        <th>Immatriculation</th>
+        <th>Marque et modèle</th>
+        <th>Année</th>
+        <th>Chauffeur</th>
+        <th class="ff-droite">Kilométrage</th>
+        <th class="ff-droite">L / 100 km</th>
+        <th>Statut</th>
+        <th>Assurance</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for vehicule in vehicules %}
         <tr>
-          <th>Immatriculation</th>
-          <th>Véhicule</th>
-          <th>Type</th>
-          <th>Statut</th>
-          <th class="text-end">Kilométrage</th>
-          <th>Assurance</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for vehicule in vehicules %}
-          <tr{% if not vehicule.actif %} class="table-secondary"{% endif %}>
-            <td>
-              <a href="{{ vehicule.get_absolute_url }}" class="fw-semibold">
-                {{ vehicule.immatriculation }}
+          <td>
+            <a class="ff-chiffre fw-medium" href="{{ vehicule.get_absolute_url }}">
+              {{ vehicule.immatriculation }}
+            </a>
+          </td>
+          <td>{{ vehicule.marque }} {{ vehicule.modele }}</td>
+          <td class="ff-chiffre">{{ vehicule.annee }}</td>
+          <td>
+            {% if vehicule.mission_en_cours %}
+              <a href="{{ vehicule.mission_en_cours.chauffeur.get_absolute_url }}">
+                {{ vehicule.mission_en_cours.chauffeur.nom }}
               </a>
-              {% if not vehicule.actif %}
-                <span class="badge bg-secondary ms-1">Sorti</span>
-              {% endif %}
-            </td>
-            <td>{{ vehicule.marque }} {{ vehicule.modele }}
-              <span class="text-body-secondary small">({{ vehicule.annee }})</span>
-            </td>
-            <td>{{ vehicule.get_type_vehicule_display }}</td>
-            <td>{{ vehicule.get_statut_display }}</td>
+            {% else %}
+              <span class="text-body-tertiary">—</span>
+            {% endif %}
+          </td>
+          <td class="ff-droite ff-chiffre">{{ vehicule.kilometrage|intcomma }}</td>
+          <td class="ff-droite ff-chiffre">
             {% comment %}
-              intcomma n'est pas utilisé : django.contrib.humanize n'est pas
-              installé, et l'ajouter pour un séparateur de milliers ne se
-              justifie pas encore.
+              consommation_moyenne vaut None quand le camion n'a qu'un seul
+              plein : « inconnu » et « zéro » ne sont pas la même chose.
             {% endcomment %}
-            <td class="text-end">{{ vehicule.kilometrage }} km</td>
-            <td>
-              {# statut_assurance est préparé par la vue, pas calculé ici. #}
-              <span class="badge {{ vehicule.statut_assurance.classe_css }}">
-                {{ vehicule.statut_assurance.libelle }}
-              </span>
-            </td>
-            <td class="text-end">
-              <a class="btn btn-sm btn-outline-dark"
-                 href="{{ vehicule.get_absolute_url }}">Fiche</a>
-            </td>
-          </tr>
-        {% empty %}
-          <tr>
-            <td colspan="7" class="text-center text-body-secondary py-4">
-              Aucun véhicule ne correspond à ces critères.
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+            {% if vehicule.consommation_moyenne is not None %}
+              {{ vehicule.consommation_moyenne }}
+            {% else %}
+              <span class="text-body-tertiary">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% include "partials/_badge.html" with statut=vehicule.statut_operationnel only %}
+          </td>
+          <td>
+            {% include "partials/_badge.html" with statut=vehicule.statut_assurance only %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr>
+          <td colspan="8" class="ff-tableau__vide">
+            Aucun camion ne correspond à ces critères.
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </div>
 
 {% include "partials/_pagination.html" %}
+
+<div class="ff-kpis mt-4">
+  {% include "partials/_carte_kpi.html" with libelle="Kilométrage cumulé" valeur=indicateurs.kilometrage_cumule|intcomma unite="km" aide="Ensemble de la flotte" only %}
+
+  {% if indicateurs.consommation_moyenne is not None %}
+    {% include "partials/_carte_kpi.html" with libelle="Consommation moyenne" valeur=indicateurs.consommation_moyenne unite="L/100 km" aide="Pondérée par la distance" only %}
+  {% else %}
+    {% include "partials/_carte_kpi.html" with libelle="Consommation moyenne" valeur="—" aide="Pas encore deux pleins sur un même camion" only %}
+  {% endif %}
+
+  {% include "partials/_carte_kpi.html" with libelle="Âge moyen du parc" valeur=indicateurs.age_moyen unite="ans" aide=aide_age only %}
+
+  {% if indicateurs.immobilises %}
+    {% include "partials/_carte_kpi.html" with libelle="Immobilisation" valeur=indicateurs.immobilises|length unite=unite_immobilisation aide=aide_immobilisation variante="alerte" only %}
+  {% else %}
+    {% include "partials/_carte_kpi.html" with libelle="Immobilisation" valeur="0" unite="camion" aide="Aucun camion en maintenance" only %}
+  {% endif %}
+</div>
 
 {% endblock %}

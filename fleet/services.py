@@ -92,7 +92,11 @@ class StatutEcheance:
 
     code: str
     libelle: str
-    classe_css: str
+    # Le ton est semantique (« vert », « ambre », « rouge », « neutre »), pas
+    # une classe CSS. Les services ne connaissent pas la feuille de style :
+    # c'est partials/badge.html qui traduit un ton en classe. Le jour ou le
+    # theme change, services.py n'est pas touche.
+    ton: str
     jours: int | None
 
     @property
@@ -107,7 +111,7 @@ class StatutKilometrique:
 
     code: str
     libelle: str
-    classe_css: str
+    ton: str
     km_restants: int | None
 
     @property
@@ -133,7 +137,7 @@ def statut_echeance(date_expiration, seuil_jours=SEUIL_ALERTE_ECHEANCE_JOURS):
         return StatutEcheance(
             code=ECHEANCE_SANS,
             libelle="Sans échéance",
-            classe_css="bg-secondary",
+            ton="neutre",
             jours=None,
         )
 
@@ -147,20 +151,20 @@ def statut_echeance(date_expiration, seuil_jours=SEUIL_ALERTE_ECHEANCE_JOURS):
         return StatutEcheance(
             code=ECHEANCE_EXPIREE,
             libelle=f"Expiré depuis {abs(jours)} j",
-            classe_css="bg-danger",
+            ton="rouge",
             jours=jours,
         )
     if jours <= seuil_jours:
         return StatutEcheance(
             code=ECHEANCE_BIENTOT,
             libelle=f"Expire dans {jours} j",
-            classe_css="bg-warning text-dark",
+            ton="ambre",
             jours=jours,
         )
     return StatutEcheance(
         code=ECHEANCE_VALIDE,
         libelle=f"Valide ({jours} j)",
-        classe_css="bg-success",
+        ton="vert",
         jours=jours,
     )
 
@@ -193,7 +197,7 @@ def statut_assurance(vehicule):
         return StatutEcheance(
             code=ECHEANCE_ABSENTE,
             libelle="Aucune attestation",
-            classe_css="bg-dark",
+            ton="ambre",
             jours=None,
         )
     return statut_echeance(vehicule.date_fin_assurance)
@@ -205,7 +209,7 @@ def statut_visite_technique(vehicule):
         return StatutEcheance(
             code=ECHEANCE_ABSENTE,
             libelle="Aucun procès-verbal",
-            classe_css="bg-dark",
+            ton="ambre",
             jours=None,
         )
     return statut_echeance(vehicule.date_visite_technique)
@@ -228,7 +232,7 @@ def statut_prochain_entretien(entretien, kilometrage_actuel):
         return StatutKilometrique(
             code=ECHEANCE_SANS,
             libelle="Sans échéance",
-            classe_css="bg-secondary",
+            ton="neutre",
             km_restants=None,
         )
 
@@ -238,20 +242,20 @@ def statut_prochain_entretien(entretien, kilometrage_actuel):
         return StatutKilometrique(
             code=ECHEANCE_EXPIREE,
             libelle=f"En retard de {abs(km_restants)} km",
-            classe_css="bg-danger",
+            ton="rouge",
             km_restants=km_restants,
         )
     if km_restants <= SEUIL_ALERTE_ENTRETIEN_KM:
         return StatutKilometrique(
             code=ECHEANCE_BIENTOT,
             libelle=f"À faire dans {km_restants} km",
-            classe_css="bg-warning text-dark",
+            ton="ambre",
             km_restants=km_restants,
         )
     return StatutKilometrique(
         code=ECHEANCE_VALIDE,
         libelle=f"À venir dans {km_restants} km",
-        classe_css="bg-success",
+        ton="vert",
         km_restants=km_restants,
     )
 
@@ -729,3 +733,291 @@ def enregistrer_entretien(
         vehicule.save(update_fields=["kilometrage"])
 
     return entretien
+
+
+# --- Cumuls et annotations de liste -----------------------------------------
+
+
+def _cumuls_carburant(identifiants):
+    """Pour chaque véhicule, le total des litres et des kilomètres mesurables.
+
+    « Mesurable » veut dire : entre deux pleins successifs. Le premier plein
+    d'un véhicule ne compte pas, puisqu'aucune distance ne lui est rattachée.
+
+    Renvoie {pk: (litres, kilometres)} et ne coûte **qu'une requête**, quel
+    que soit le nombre de véhicules. C'est la brique commune à la
+    consommation d'une ligne de tableau et à celle de toute la flotte : deux
+    calculs séparés finiraient par ne plus donner le même chiffre.
+    """
+    if not identifiants:
+        return {}
+
+    historique = {}
+    for plein in PleinCarburant.objects.filter(
+        vehicule_id__in=identifiants
+    ).order_by("vehicule_id", "date", "pk"):
+        historique.setdefault(plein.vehicule_id, []).append(plein)
+
+    cumuls = {}
+    for identifiant, pleins_du_vehicule in historique.items():
+        litres = Decimal("0")
+        kilometres = 0
+        for precedent, courant in zip(pleins_du_vehicule, pleins_du_vehicule[1:]):
+            distance = courant.km_compteur - precedent.km_compteur
+            if distance > 0:
+                litres += courant.litres
+                kilometres += distance
+        cumuls[identifiant] = (litres, kilometres)
+    return cumuls
+
+
+def annoter_consommation_moyenne(vehicules):
+    """Attache `consommation_moyenne` (L/100 km) à chaque véhicule d'une liste.
+
+    None quand aucun couple de pleins n'est exploitable : un véhicule qui n'a
+    qu'un seul plein n'a pas une consommation de zéro, il a une consommation
+    inconnue.
+    """
+    vehicules = list(vehicules)
+    cumuls = _cumuls_carburant([vehicule.pk for vehicule in vehicules])
+
+    for vehicule in vehicules:
+        litres, kilometres = cumuls.get(vehicule.pk, (Decimal("0"), 0))
+        if kilometres > 0:
+            vehicule.consommation_moyenne = (
+                litres / Decimal(kilometres) * Decimal(100)
+            ).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+        else:
+            vehicule.consommation_moyenne = None
+    return vehicules
+
+
+def missions_en_cours_par_vehicule(vehicules):
+    """{pk du véhicule: sa mission en cours}, en une seule requête.
+
+    Sert à afficher le chauffeur affecté sur chaque ligne de la liste des
+    camions. Appeler missions_en_cours() dans la boucle du gabarit coûterait
+    une requête par ligne.
+    """
+    identifiants = [vehicule.pk for vehicule in vehicules]
+    if not identifiants:
+        return {}
+
+    missions = (
+        Mission.objects.filter(
+            statut=Mission.Statut.EN_COURS, vehicule_id__in=identifiants
+        )
+        .select_related("chauffeur")
+        .order_by("vehicule_id", "-date_depart")
+    )
+    # Un véhicule ne peut porter qu'une mission en cours (garanti par
+    # creer_mission), mais on reste tolérant à des données importées à la main.
+    return {mission.vehicule_id: mission for mission in missions}
+
+
+# --- Indicateurs de flotte ---------------------------------------------------
+
+
+@dataclass(frozen=True)
+class IndicateursFlotte:
+    """Les quatre chiffres affichés sous la liste des camions.
+
+    Un objet plutôt qu'un dictionnaire : les champs sont nommés une fois ici,
+    une faute de frappe dans un gabarit (`indicateurs.age_moyenne`) affiche du
+    vide au lieu de lever une erreur — mais au moins le contrat est écrit et
+    testable.
+    """
+
+    total: int
+    en_service: int
+    kilometrage_cumule: int
+    consommation_moyenne: Decimal | None
+    age_moyen: Decimal | None
+    annee_plus_ancien: int | None
+    immobilises: tuple
+
+
+def indicateurs_flotte(vehicules=None):
+    """Calcule les indicateurs de la flotte active.
+
+    Le calcul est ici et non dans la vue pour la même raison que le reste :
+    le tableau de bord du Jour 3 et un futur export Excel afficheront les
+    mêmes chiffres, et deux calculs séparés finiraient par ne plus dire la
+    même chose.
+
+    Coût : deux requêtes, quel que soit le nombre de camions — une pour les
+    véhicules, une pour l'ensemble de leurs pleins.
+    """
+    if vehicules is None:
+        vehicules = Vehicule.objects.filter(actif=True)
+    vehicules = list(vehicules)
+
+    if not vehicules:
+        return IndicateursFlotte(
+            total=0,
+            en_service=0,
+            kilometrage_cumule=0,
+            consommation_moyenne=None,
+            age_moyen=None,
+            annee_plus_ancien=None,
+            immobilises=(),
+        )
+
+    kilometrage_cumule = sum(vehicule.kilometrage for vehicule in vehicules)
+
+    en_service = sum(
+        1
+        for vehicule in vehicules
+        if vehicule.actif
+        and vehicule.statut in (Vehicule.Statut.DISPONIBLE, Vehicule.Statut.EN_MISSION)
+    )
+
+    immobilises = tuple(
+        vehicule.immatriculation
+        for vehicule in vehicules
+        if vehicule.statut == Vehicule.Statut.EN_MAINTENANCE
+    )
+
+    # Consommation moyenne *pondérée par la distance*, et non moyenne des
+    # consommations : un camion qui fait 400 km doit peser deux fois plus
+    # qu'un utilitaire qui en fait 200. On additionne donc les litres et les
+    # kilomètres de toute la flotte avant de diviser. Faire la moyenne des
+    # L/100 km individuels donnerait un chiffre que rien ne vérifie.
+    cumuls = _cumuls_carburant([vehicule.pk for vehicule in vehicules])
+    total_litres = sum((litres for litres, _km in cumuls.values()), Decimal("0"))
+    total_km = sum(km for _litres, km in cumuls.values())
+
+    if total_km:
+        consommation_moyenne = (
+            total_litres / Decimal(total_km) * Decimal(100)
+        ).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    else:
+        # Aucun couple de pleins exploitable : on ne sait pas, et on le dit.
+        consommation_moyenne = None
+
+    annees = [vehicule.annee for vehicule in vehicules if vehicule.annee]
+    if annees:
+        annee_courante = timezone.localdate().year
+        age_moyen = (
+            Decimal(sum(annee_courante - annee for annee in annees))
+            / Decimal(len(annees))
+        ).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+        annee_plus_ancien = min(annees)
+    else:
+        age_moyen = None
+        annee_plus_ancien = None
+
+    return IndicateursFlotte(
+        total=len(vehicules),
+        en_service=en_service,
+        kilometrage_cumule=kilometrage_cumule,
+        consommation_moyenne=consommation_moyenne,
+        age_moyen=age_moyen,
+        annee_plus_ancien=annee_plus_ancien,
+        immobilises=immobilises,
+    )
+
+
+# --- Statuts affichables -----------------------------------------------------
+# Traduire un statut en couleur est une décision métier, pas une décision de
+# gabarit : « en maintenance » est-il inquiétant ou neutre ? La réponse est
+# écrite ici, une fois, et les gabarits ne font que l'afficher.
+
+TONS_STATUT_VEHICULE = {
+    Vehicule.Statut.EN_MISSION: "vert",
+    Vehicule.Statut.DISPONIBLE: "neutre",
+    Vehicule.Statut.EN_MAINTENANCE: "ambre",
+    Vehicule.Statut.HORS_SERVICE: "rouge",
+}
+
+
+@dataclass(frozen=True)
+class StatutAffichable:
+    """Un état prêt à poser dans une pastille : un ton et un libellé."""
+
+    code: str
+    libelle: str
+    ton: str
+
+
+def statut_operationnel(vehicule):
+    """L'état d'exploitation d'un camion, prêt à afficher.
+
+    À ne pas confondre avec le statut GPS (en route / à l'arrêt / sans
+    signal), qui sera calculé à partir des positions remontées par le boîtier
+    et n'existe pas encore. Celui-ci est saisi et vaut pour la flotte ;
+    l'autre sera mesuré.
+    """
+    if not vehicule.actif:
+        return StatutAffichable(code="sorti", libelle="Sorti de la flotte", ton="rouge")
+    return StatutAffichable(
+        code=vehicule.statut,
+        libelle=vehicule.get_statut_display(),
+        ton=TONS_STATUT_VEHICULE.get(vehicule.statut, "neutre"),
+    )
+
+
+# Sentinelle : « cet argument n'a pas été fourni ». On ne peut pas utiliser
+# None pour ça, car None est une réponse légitime — « j'ai cherché, ce
+# chauffeur n'est sur aucune mission ». Les deux cas demandent un comportement
+# opposé : interroger la base, ou ne surtout pas l'interroger.
+_NON_FOURNI = object()
+
+
+def statut_chauffeur(chauffeur, mission_en_cours=_NON_FOURNI):
+    """L'état d'un chauffeur : en mission, disponible ou désactivé.
+
+    `mission_en_cours` peut être fourni par l'appelant quand il l'a déjà
+    chargé — c'est ce qui évite une requête par ligne dans une liste. Passer
+    explicitement None signifie « j'ai vérifié, il n'y en a pas » et ne
+    déclenche aucune requête.
+    """
+    if not chauffeur.actif:
+        return StatutAffichable(code="inactif", libelle="Désactivé", ton="rouge")
+
+    if mission_en_cours is _NON_FOURNI:
+        mission_en_cours = missions_en_cours(chauffeur=chauffeur).first()
+
+    if mission_en_cours is not None:
+        return StatutAffichable(code="en_mission", libelle="En mission", ton="vert")
+    return StatutAffichable(code="disponible", libelle="Disponible", ton="neutre")
+
+
+def missions_en_cours_par_chauffeur(chauffeurs):
+    """{pk du chauffeur: sa mission en cours}, en une seule requête.
+
+    Le pendant de missions_en_cours_par_vehicule, pour la liste des
+    chauffeurs. Les deux fonctions restent distinctes plutôt qu'une seule
+    paramétrée : deux lignes de plus, mais l'appelant lit ce qu'il obtient.
+    """
+    identifiants = [chauffeur.pk for chauffeur in chauffeurs]
+    if not identifiants:
+        return {}
+
+    missions = (
+        Mission.objects.filter(
+            statut=Mission.Statut.EN_COURS, chauffeur_id__in=identifiants
+        )
+        .select_related("vehicule")
+        .order_by("chauffeur_id", "-date_depart")
+    )
+    return {mission.chauffeur_id: mission for mission in missions}
+
+
+TONS_STATUT_MISSION = {
+    Mission.Statut.EN_COURS: "vert",
+    Mission.Statut.PLANIFIEE: "ambre",
+    Mission.Statut.TERMINEE: "neutre",
+    # Une annulation n'est pas un incident technique, mais c'est une course
+    # perdue : elle doit se voir dans une liste.
+    Mission.Statut.ANNULEE: "rouge",
+}
+
+
+def statut_mission(mission):
+    """L'état d'une mission, prêt à poser dans une pastille."""
+    return StatutAffichable(
+        code=mission.statut,
+        libelle=mission.get_statut_display(),
+        ton=TONS_STATUT_MISSION.get(mission.statut, "neutre"),
+    )

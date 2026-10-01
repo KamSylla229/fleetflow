@@ -44,6 +44,10 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    # humanize fait partie de Django, ce n'est pas une dependance nouvelle.
+    # On s'en sert pour intcomma, qui en locale fr-fr separe les milliers par
+    # une espace insecable : 1 240 000 au lieu de 1240000.
+    'django.contrib.humanize',
     'fleet',
 ]
 
@@ -69,6 +73,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                "fleet.context_processors.navigation",
             ],
         },
     },
@@ -113,7 +118,16 @@ AUTH_PASSWORD_VALIDATORS = [
 # Django etiquette ses messages d'erreur "error" ; Bootstrap attend la classe
 # "alert-danger". Renommer la categorie ici evite d'ecrire un if dans chaque
 # gabarit qui affiche des messages.
-MESSAGE_TAGS = {messages_constants.ERROR: "danger"}
+# Les categories de Django sont renommees directement en tons du theme.
+# Le gabarit ecrit alors « ff-bandeau--{{ message.tags }} » et ne decide
+# d'aucune couleur : la correspondance vit ici, en un seul endroit.
+MESSAGE_TAGS = {
+    messages_constants.DEBUG: "neutre",
+    messages_constants.INFO: "neutre",
+    messages_constants.SUCCESS: "vert",
+    messages_constants.WARNING: "ambre",
+    messages_constants.ERROR: "rouge",
+}
 
 
 # Authentification
@@ -148,7 +162,14 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = "static/"
+
+# Les fichiers du theme et les ressources rapatriees (Bootstrap, icones,
+# polices) vivent dans static/ a la racine du projet. STATICFILES_DIRS les
+# declare a Django ; en DEBUG, le serveur de developpement les sert seul.
+# En production il faudra un collectstatic et un serveur de fichiers : note
+# au BACKLOG.
+STATICFILES_DIRS = [BASE_DIR / "static"]
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

@@ -119,11 +119,37 @@ class VehiculeListView(ListeFiltrableView):
     def get_context_data(self, **kwargs):
         contexte = super().get_context_data(**kwargs)
 
-        # Le statut d'échéance est calculé ici, une fois par ligne affichée, et
-        # attaché à l'objet. Un gabarit Django ne peut pas appeler une fonction
-        # avec un argument : c'est à la vue de préparer ce qu'il affichera.
-        for vehicule in contexte["vehicules"]:
+        # Deux requêtes pour toute la page, quel que soit le nombre de lignes :
+        # une pour les consommations, une pour les missions en cours. Appeler
+        # ces services dans la boucle du gabarit en coûterait deux par ligne.
+        vehicules = services.annoter_consommation_moyenne(contexte["vehicules"])
+        missions = services.missions_en_cours_par_vehicule(vehicules)
+
+        # Le statut est calculé ici, une fois par ligne, et attaché à l'objet.
+        # Un gabarit Django ne peut pas appeler une fonction avec un argument :
+        # c'est à la vue de préparer ce qu'il affichera.
+        for vehicule in vehicules:
             vehicule.statut_assurance = services.statut_assurance(vehicule)
+            vehicule.statut_operationnel = services.statut_operationnel(vehicule)
+            vehicule.mission_en_cours = missions.get(vehicule.pk)
+        contexte["vehicules"] = vehicules
+
+        # Les indicateurs portent sur la flotte active entière, pas sur la page
+        # affichée : « kilométrage cumulé » n'aurait aucun sens page par page.
+        indicateurs = services.indicateurs_flotte()
+        contexte["indicateurs"] = indicateurs
+
+        # Les lignes d'aide des cartes sont du texte d'interface, assemblé ici
+        # plutôt que dans le gabarit, où une condition de plus nuirait à la
+        # lecture.
+        if indicateurs.annee_plus_ancien:
+            contexte["aide_age"] = f"Le plus ancien : {indicateurs.annee_plus_ancien}"
+        else:
+            contexte["aide_age"] = ""
+        contexte["aide_immobilisation"] = ", ".join(indicateurs.immobilises)
+        contexte["unite_immobilisation"] = (
+            "camions" if len(indicateurs.immobilises) > 1 else "camion"
+        )
 
         contexte["statuts"] = Vehicule.Statut.choices
         contexte["recherche"] = self.request.GET.get("q", "")
@@ -143,6 +169,7 @@ class VehiculeDetailView(LoginRequiredMixin, DetailView):
         vehicule = self.object
 
         contexte["documents"] = services.documents_avec_statut(vehicule)
+        contexte["statut_operationnel"] = services.statut_operationnel(vehicule)
         contexte["statut_assurance"] = services.statut_assurance(vehicule)
         contexte["statut_visite"] = services.statut_visite_technique(vehicule)
         # La mission en cours donne le chauffeur actuellement affecté : aucun
@@ -270,8 +297,20 @@ class ChauffeurListView(ListeFiltrableView):
 
     def get_context_data(self, **kwargs):
         contexte = super().get_context_data(**kwargs)
-        for chauffeur in contexte["chauffeurs"]:
+
+        # Une requête pour toute la page : sans elle, statut_chauffeur()
+        # interrogerait la base une fois par ligne pour savoir si le chauffeur
+        # est en mission.
+        chauffeurs = list(contexte["chauffeurs"])
+        missions = services.missions_en_cours_par_chauffeur(chauffeurs)
+        for chauffeur in chauffeurs:
             chauffeur.statut_permis = services.statut_permis(chauffeur)
+            chauffeur.mission_en_cours = missions.get(chauffeur.pk)
+            chauffeur.statut_activite = services.statut_chauffeur(
+                chauffeur, mission_en_cours=chauffeur.mission_en_cours
+            )
+        contexte["chauffeurs"] = chauffeurs
+
         contexte["recherche"] = self.request.GET.get("q", "")
         contexte["actif_choisi"] = self.request.GET.get("actif", "1")
         contexte["permis_choisi"] = self.request.GET.get("permis", "")
@@ -286,6 +325,7 @@ class ChauffeurDetailView(LoginRequiredMixin, DetailView):
     def get_context_data(self, **kwargs):
         contexte = super().get_context_data(**kwargs)
         contexte["statut_permis"] = services.statut_permis(self.object)
+        contexte["statut_activite"] = services.statut_chauffeur(self.object)
         contexte["mission_en_cours"] = (
             services.missions_en_cours(chauffeur=self.object)
             .select_related("vehicule")
@@ -407,6 +447,11 @@ class MissionListView(ListeFiltrableView):
 
     def get_context_data(self, **kwargs):
         contexte = super().get_context_data(**kwargs)
+        # Le ton de chaque pastille vient de services.py : le gabarit ne
+        # choisit pas qu'une mission annulée se voit en rouge.
+        for mission in contexte["missions"]:
+            mission.statut_affichable = services.statut_mission(mission)
+
         contexte.update(_contexte_periode(self.request))
         contexte["vehicules"] = Vehicule.objects.all()
         contexte["chauffeurs"] = Chauffeur.objects.all()

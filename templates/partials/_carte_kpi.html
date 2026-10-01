@@ -1,0 +1,17 @@
+{% comment %}
+  Carte d'indicateur. Paramètres :
+    libelle  (obligatoire) — en petites majuscules
+    valeur   (obligatoire) — en police à chasse fixe
+    unite    (optionnel)   — « km », « L/100 », « ans »
+    aide     (optionnel)   — ligne grise sous la valeur
+    variante (optionnel)   — "avant" (mise en avant verte) ou "alerte" (rouge)
+
+  Appel : {% include "partials/_carte_kpi.html" with libelle="…" valeur=… only %}
+{% endcomment %}
+<div class="ff-kpi{% if variante %} ff-kpi--{{ variante }}{% endif %}">
+  <p class="ff-kpi__libelle">{{ libelle }}</p>
+  <p class="ff-kpi__valeur">
+    {{ valeur }}{% if unite %}<span class="ff-kpi__unite">{{ unite }}</span>{% endif %}
+  </p>
+  {% if aide %}<p class="ff-kpi__aide">{{ aide }}</p>{% endif %}
+</div>

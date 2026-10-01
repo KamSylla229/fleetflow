@@ -1,0 +1,117 @@
+{% comment %}
+  La barre de navigation, incluse deux fois : dans la colonne fixe sur grand
+  écran, et dans l'offcanvas Bootstrap sous 992 px. Un seul gabarit, donc un
+  seul menu à maintenir — ajouter une entrée la fait apparaître aux deux
+  endroits.
+
+  `nav_actif` vient du context processor fleet.context_processors.navigation :
+  il est disponible sur toutes les pages sans qu'aucune vue ne le passe.
+
+  Les entrées dont la page n'existe pas encore sont des <span> et non des
+  liens désactivés : un lien mort reste atteignable au clavier et promet une
+  destination. Elles montrent la structure à venir de l'application.
+{% endcomment %}
+
+<a class="ff-logo" href="{% url 'fleet:accueil' %}">
+  <span class="ff-logo__carre" aria-hidden="true">F</span>
+  <span>
+    <span class="ff-logo__nom">FleetFlow</span>
+    <span class="ff-logo__client">Démo Transport</span>
+  </span>
+</a>
+
+<nav class="ff-nav" aria-label="Navigation principale">
+
+  <span class="ff-nav__item ff-nav__item--bientot">
+    <i class="bi bi-grid-1x2" aria-hidden="true"></i>
+    <span class="ff-nav__libelle">Tableau de bord</span>
+    <span class="ff-nav__bientot">bientôt</span>
+  </span>
+
+  <span class="ff-nav__item ff-nav__item--bientot">
+    <i class="bi bi-map" aria-hidden="true"></i>
+    <span class="ff-nav__libelle">Carte</span>
+    <span class="ff-nav__bientot">bientôt</span>
+  </span>
+
+  <a class="ff-nav__item{% if nav_actif == 'camions' %} ff-nav__item--actif{% endif %}"
+     href="{% url 'fleet:vehicule_liste' %}"
+     {% if nav_actif == 'camions' %}aria-current="page"{% endif %}>
+    <i class="bi bi-truck" aria-hidden="true"></i>
+    <span class="ff-nav__libelle">Camions</span>
+  </a>
+
+  <a class="ff-nav__item{% if nav_actif == 'chauffeurs' %} ff-nav__item--actif{% endif %}"
+     href="{% url 'fleet:chauffeur_liste' %}"
+     {% if nav_actif == 'chauffeurs' %}aria-current="page"{% endif %}>
+    <i class="bi bi-person" aria-hidden="true"></i>
+    <span class="ff-nav__libelle">Chauffeurs</span>
+  </a>
+
+  <a class="ff-nav__item{% if nav_actif == 'missions' %} ff-nav__item--actif{% endif %}"
+     href="{% url 'fleet:mission_liste' %}"
+     {% if nav_actif == 'missions' %}aria-current="page"{% endif %}>
+    <i class="bi bi-signpost-split" aria-hidden="true"></i>
+    <span class="ff-nav__libelle">Missions</span>
+  </a>
+
+  <a class="ff-nav__item{% if nav_actif == 'carburant' %} ff-nav__item--actif{% endif %}"
+     href="{% url 'fleet:plein_liste' %}"
+     {% if nav_actif == 'carburant' %}aria-current="page"{% endif %}>
+    <i class="bi bi-fuel-pump" aria-hidden="true"></i>
+    <span class="ff-nav__libelle">Carburant</span>
+  </a>
+
+  <a class="ff-nav__item{% if nav_actif == 'entretien' %} ff-nav__item--actif{% endif %}"
+     href="{% url 'fleet:entretien_liste' %}"
+     {% if nav_actif == 'entretien' %}aria-current="page"{% endif %}>
+    <i class="bi bi-wrench" aria-hidden="true"></i>
+    <span class="ff-nav__libelle">Entretien</span>
+  </a>
+
+  <a class="ff-nav__item{% if nav_actif == 'documents' %} ff-nav__item--actif{% endif %}"
+     href="{% url 'fleet:document_liste' %}"
+     {% if nav_actif == 'documents' %}aria-current="page"{% endif %}>
+    <i class="bi bi-file-earmark-text" aria-hidden="true"></i>
+    <span class="ff-nav__libelle">Documents</span>
+  </a>
+
+  <span class="ff-nav__item ff-nav__item--bientot">
+    <i class="bi bi-journal-text" aria-hidden="true"></i>
+    <span class="ff-nav__libelle">Rapports</span>
+    <span class="ff-nav__bientot">bientôt</span>
+  </span>
+
+  <span class="ff-nav__item ff-nav__item--bientot">
+    <i class="bi bi-broadcast-pin" aria-hidden="true"></i>
+    <span class="ff-nav__libelle">Fournisseurs GPS</span>
+    <span class="ff-nav__bientot">bientôt</span>
+  </span>
+
+  {% if user.is_staff %}
+    <a class="ff-nav__item" href="/admin/">
+      <i class="bi bi-sliders" aria-hidden="true"></i>
+      <span class="ff-nav__libelle">Admin Django</span>
+    </a>
+  {% endif %}
+
+</nav>
+
+<div class="ff-utilisateur">
+  {% comment %}
+    initiales_utilisateur vient du context processor : aucun calcul ici.
+  {% endcomment %}
+  <span class="ff-pastille-initiales" aria-hidden="true">{{ initiales_utilisateur }}</span>
+  <span class="flex-grow-1">
+    <span class="ff-utilisateur__nom">
+      {{ user.get_full_name|default:user.get_username }}
+    </span>
+    <span class="ff-utilisateur__role">
+      {% if user.is_superuser %}Administrateur{% else %}Gestionnaire{% endif %}
+    </span>
+  </span>
+  <form method="post" action="{% url 'logout' %}">
+    {% csrf_token %}
+    <button type="submit" class="ff-deconnexion">Déconnexion</button>
+  </form>
+</div>
