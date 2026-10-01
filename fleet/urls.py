@@ -87,4 +87,9 @@ urlpatterns = [
     ),
     # --- Documents ---
     path("documents/", views.DocumentListView.as_view(), name="document_liste"),
+    # --- Alertes ---
+    path("alertes/", views.AlerteListView.as_view(), name="alerte_liste"),
+    # Fragment recharge par le script : il ne rend qu'un morceau de page, pas
+    # une page entiere.
+    path("alertes/bandeau/", views.alerte_bandeau, name="alerte_bandeau"),
 ]

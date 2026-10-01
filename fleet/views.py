@@ -18,7 +18,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.messages.views import SuccessMessageMixin
 from django.core.exceptions import ValidationError
 from django.db.models import Q
-from django.shortcuts import get_object_or_404, redirect
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -29,6 +29,7 @@ from django.views.generic import (
     FormView,
     ListView,
     RedirectView,
+    TemplateView,
     UpdateView,
 )
 
@@ -41,7 +42,15 @@ from .forms import (
     PleinCarburantForm,
     VehiculeForm,
 )
-from .models import Chauffeur, Document, Entretien, Mission, PleinCarburant, Vehicule
+from .models import (
+    Alerte,
+    Chauffeur,
+    Document,
+    Entretien,
+    Mission,
+    PleinCarburant,
+    Vehicule,
+)
 
 
 class AccueilView(LoginRequiredMixin, RedirectView):
@@ -792,3 +801,43 @@ class DocumentListView(ListeFiltrableView):
         contexte["type_choisi"] = self.request.GET.get("type", "")
         contexte["etat_choisi"] = etat
         return contexte
+
+
+# --- Alertes -----------------------------------------------------------------
+
+
+class AlerteListView(LoginRequiredMixin, TemplateView):
+    """Les alertes ouvertes, puis les dernières résolues.
+
+    Une TemplateView et non une ListView : la page montre deux listes de
+    natures différentes, et une ListView n'en pagine qu'une.
+    """
+
+    template_name = "fleet/alerte_liste.html"
+
+    def get_context_data(self, **kwargs):
+        contexte = super().get_context_data(**kwargs)
+        contexte["ouvertes"] = services.alertes_ouvertes()
+        # Les cinquante dernières résolutions : au-delà, c'est de l'archive
+        # dont personne ne se sert, et la page n'a pas à la charger.
+        contexte["resolues"] = (
+            Alerte.objects.filter(resolue_le__isnull=False)
+            .select_related("vehicule", "chauffeur", "document__vehicule")
+            .order_by("-resolue_le")[:50]
+        )
+        return contexte
+
+
+@login_required
+def alerte_bandeau(request):
+    """Le fragment des bandeaux, réinterrogé par le script toutes les 30 s.
+
+    Renvoie du HTML et non du JSON : le gabarit du bandeau existe déjà, et le
+    script n'a alors qu'à remplacer le contenu d'un conteneur. Produire du
+    JSON obligerait à écrire une deuxième fois, en JavaScript, la mise en
+    forme que Django sait faire.
+
+    Le context processor fournit déjà `alertes_sans_signal` : cette vue n'a
+    rien à calculer.
+    """
+    return render(request, "partials/_bandeau_alertes.html")

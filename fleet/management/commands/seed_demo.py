@@ -30,6 +30,7 @@ from django.utils import timezone
 from fleet import services
 from fleet.itineraires import ITINERAIRES
 from fleet.models import (
+    Alerte,
     Chauffeur,
     Document,
     Entretien,
@@ -224,6 +225,10 @@ class Command(BaseCommand):
         # PositionGPS est en CASCADE : supprimer les véhicules suffirait. On
         # l'efface explicitement quand même, pour que l'ordre de ce bloc se
         # lise comme la liste complète de ce que la commande détruit.
+        # Alerte est en CASCADE sur ses trois cles etrangeres : la supprimer
+        # explicitement garde ce bloc lisible comme la liste complete de ce
+        # que la commande detruit.
+        Alerte.objects.all().delete()
         PositionGPS.objects.all().delete()
         Mission.objects.all().delete()
         PleinCarburant.objects.all().delete()

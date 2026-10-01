@@ -35,18 +35,22 @@ jour où la base passera sur PostgreSQL, et la protection n'est pas illusoire
 en attendant : SQLite sérialise les écritures.
 """
 
+import logging
 import random
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
+from functools import partial
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.mail import send_mail
 from django.db import models, transaction
 from django.db.models import OuterRef, Subquery
 from django.utils import timezone
 
 from .models import (
+    Alerte,
     Chauffeur,
     Entretien,
     FournisseurGPS,
@@ -1275,3 +1279,208 @@ def avancer_flotte(dt_secondes, rng=None, maintenant=None):
             (vehicule, avancer_position(vehicule, dt_secondes, rng=rng, maintenant=maintenant))
         )
     return resultats
+
+
+# --- Alertes -----------------------------------------------------------------
+# Une alerte est un *état*, pas un message : elle s'ouvre quand le problème
+# apparaît, se résout quand il disparaît, et garde la trace de la
+# notification. Sans cette mémoire, la simulation enverrait un courriel à
+# chaque tick — toutes les cinq secondes.
+
+logger = logging.getLogger(__name__)
+
+
+def _notifier_gerant(alerte_pk, sujet, corps):
+    """Envoie un e-mail au gérant et note la date d'envoi sur l'alerte.
+
+    Renvoie True si le message est parti. **Un échec ne doit jamais remonter**
+    jusqu'à l'appelant : la création de l'alerte est le travail important, la
+    notification n'en est qu'une conséquence. Un serveur SMTP injoignable ne
+    doit ni annuler l'alerte, ni interrompre la boucle de simulation.
+
+    `except Exception` est volontairement large : un envoi SMTP peut lever une
+    SMTPException, une erreur de socket, une erreur DNS, un délai dépassé…
+    Les énumérer donnerait une liste incomplète, et la liste incomplète
+    finirait par laisser passer celle qui casse la simulation en pleine
+    démonstration.
+
+    `email_envoye_le` reste alors vide, ce qui fait réessayer au passage
+    suivant — sans jamais envoyer deux fois.
+    """
+    destinataire = settings.FLEETFLOW_EMAIL_GERANT
+    if not destinataire:
+        logger.warning(
+            "Alerte %s non notifiée : FLEETFLOW_EMAIL_GERANT n'est pas "
+            "renseigné dans le .env.",
+            alerte_pk,
+        )
+        return False
+
+    try:
+        send_mail(
+            subject=sujet,
+            message=corps,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[destinataire],
+            fail_silently=False,
+        )
+    except Exception:
+        # logger.exception enregistre la trace complète : sans elle, on saurait
+        # qu'un envoi a échoué sans jamais savoir pourquoi.
+        logger.exception("Echec de l'envoi de l'alerte %s à %s", alerte_pk, destinataire)
+        return False
+
+    # .update() plutôt que save() : l'alerte en mémoire peut être périmée, et
+    # on ne veut écrire que cette colonne.
+    Alerte.objects.filter(pk=alerte_pk).update(email_envoye_le=timezone.now())
+    return True
+
+
+def _programmer_notification(alerte, sujet, corps):
+    """Planifie l'envoi pour après la validation de la transaction.
+
+    transaction.on_commit() : si la transaction est annulée, l'e-mail ne part
+    pas. Sans cela, on pourrait prévenir le gérant d'une alerte qui n'existe
+    pas en base — le pire des deux mondes.
+
+    functools.partial et non une lambda : dans une boucle, une lambda capture
+    la *variable* et non sa valeur, donc toutes les notifications programmées
+    porteraient sur la dernière alerte de la boucle. C'est le piège classique
+    de la fermeture tardive.
+
+    Hors transaction, Django exécute la fonction immédiatement : le même code
+    sert donc aux créations et aux reprises d'envoi.
+    """
+    transaction.on_commit(partial(_notifier_gerant, alerte.pk, sujet, corps))
+
+
+def _texte_alerte_sans_signal(vehicule, position):
+    """Le sujet et le corps de l'e-mail d'un boîtier muet."""
+    sujet = f"[FleetFlow] {vehicule.immatriculation} ne remonte plus de position"
+    if position is not None:
+        dernier = f"{timezone.localtime(position.horodatage):%d/%m/%Y à %H:%M}"
+    else:
+        dernier = "jamais"
+    corps = (
+        f"Le boîtier du camion {vehicule.immatriculation} "
+        f"({vehicule.marque} {vehicule.modele}) ne remonte plus de données GPS.\n\n"
+        f"Dernier relevé reçu : {dernier}.\n"
+        f"Fournisseur : {vehicule.fournisseur_gps or 'non renseigné'}"
+        f"{f' (boîtier {vehicule.boitier_id})' if vehicule.boitier_id else ''}.\n\n"
+        "Vérifiez le boîtier, son alimentation et la couverture réseau sur le "
+        "trajet.\n\n"
+        "-- \nFleetFlow"
+    )
+    return sujet, corps
+
+
+@transaction.atomic
+def ouvrir_alerte_sans_signal(vehicule, maintenant=None):
+    """Ouvre l'alerte « boîtier muet » d'un camion et prévient le gérant.
+
+    `ouverte_le` est daté du **dernier relevé reçu** et non de l'instant de la
+    détection. Le problème a commencé quand le boîtier s'est tu, pas quand on
+    s'en est aperçu : sans ce recalage, le bandeau annoncerait « depuis 2
+    minutes » pour un camion silencieux depuis trois heures.
+    """
+    maintenant = maintenant or timezone.now()
+    position = derniere_position(vehicule)
+
+    alerte = Alerte.objects.create(
+        type_alerte=Alerte.TypeAlerte.SANS_SIGNAL,
+        vehicule=vehicule,
+        message=(
+            f"Le boîtier de {vehicule.immatriculation} ne remonte plus de "
+            "données GPS. Boîtier à vérifier."
+        ),
+        ouverte_le=position.horodatage if position is not None else maintenant,
+    )
+
+    sujet, corps = _texte_alerte_sans_signal(vehicule, position)
+    _programmer_notification(alerte, sujet, corps)
+    return alerte
+
+
+@transaction.atomic
+def resoudre_alerte(alerte, maintenant=None):
+    """Marque une alerte comme résolue, si elle ne l'était pas déjà."""
+    maintenant = maintenant or timezone.now()
+    # .filter().update() plutôt que save() : deux passages simultanés ne
+    # doivent pas écrire deux dates de résolution différentes.
+    Alerte.objects.filter(pk=alerte.pk, resolue_le__isnull=True).update(
+        resolue_le=maintenant
+    )
+    alerte.refresh_from_db()
+    return alerte
+
+
+def alertes_ouvertes(type_alerte=None):
+    """Les alertes non résolues, les plus récentes d'abord."""
+    queryset = Alerte.objects.filter(resolue_le__isnull=True)
+    if type_alerte is not None:
+        queryset = queryset.filter(type_alerte=type_alerte)
+    return queryset.select_related("vehicule", "chauffeur", "document__vehicule")
+
+
+def verifier_signaux(maintenant=None):
+    """Ouvre, résout et notifie les alertes de boîtier muet.
+
+    Appelée à chaque tick de simulation. Trois choses :
+      - un camion passé « sans signal » sans alerte ouverte → on ouvre et on
+        prévient le gérant, **une seule fois** ;
+      - un camion dont le signal est revenu → on résout son alerte ;
+      - une alerte ouverte dont l'e-mail n'est jamais parti → on réessaie.
+
+    Ne balaye que les camions actifs **équipés d'un boîtier** : un camion sans
+    boîtier remonte « aucune donnée », ce qui n'est pas une panne.
+
+    Renvoie un dictionnaire des actions effectuées, que la commande affiche.
+    """
+    maintenant = maintenant or timezone.now()
+
+    # Une requête pour les alertes déjà ouvertes, une pour les camions et
+    # leurs derniers relevés. Le balayage lui-même n'interroge plus la base.
+    deja_ouvertes = {
+        alerte.vehicule_id: alerte
+        for alerte in Alerte.objects.filter(
+            type_alerte=Alerte.TypeAlerte.SANS_SIGNAL,
+            resolue_le__isnull=True,
+            vehicule__isnull=False,
+        )
+    }
+
+    vehicules = annoter_dernieres_positions(
+        Vehicule.objects.filter(actif=True)
+        .exclude(fournisseur_gps__isnull=True)
+        .select_related("fournisseur_gps")
+    )
+
+    ouvertes, resolues = [], []
+    for vehicule in vehicules:
+        statut = statut_gps(vehicule, maintenant=maintenant)
+        alerte = deja_ouvertes.get(vehicule.pk)
+
+        if statut.code == GPS_SANS_SIGNAL:
+            if alerte is None:
+                ouvertes.append(ouvrir_alerte_sans_signal(vehicule, maintenant))
+        elif alerte is not None:
+            resolues.append(resoudre_alerte(alerte, maintenant))
+
+    # Reprise des envois manqués : le serveur SMTP était peut-être injoignable
+    # au moment de l'ouverture. On exclut les alertes ouvertes à l'instant,
+    # dont la notification est déjà programmée.
+    pks_nouvelles = {alerte.pk for alerte in ouvertes}
+    reessayees = []
+    for alerte in Alerte.objects.filter(
+        type_alerte=Alerte.TypeAlerte.SANS_SIGNAL,
+        resolue_le__isnull=True,
+        email_envoye_le__isnull=True,
+        vehicule__isnull=False,
+    ).exclude(pk__in=pks_nouvelles).select_related("vehicule", "vehicule__fournisseur_gps"):
+        sujet, corps = _texte_alerte_sans_signal(
+            alerte.vehicule, derniere_position(alerte.vehicule)
+        )
+        _programmer_notification(alerte, sujet, corps)
+        reessayees.append(alerte)
+
+    return {"ouvertes": ouvertes, "resolues": resolues, "reessayees": reessayees}

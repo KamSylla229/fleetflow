@@ -54,6 +54,16 @@
     </div>
 
     {% comment %}
+      Le conteneur est rendu même vide : c'est lui que le script remplit
+      toutes les trente secondes, et sans lui une alerte qui apparaît
+      n'arriverait jamais sur une page restée ouverte.
+    {% endcomment %}
+    <div id="bandeau-alertes"
+         data-rafraichir-url="{% url 'fleet:alerte_bandeau' %}">
+      {% include "partials/_bandeau_alertes.html" %}
+    </div>
+
+    {% comment %}
       Les messages Django. MESSAGE_TAGS les étiquette déjà en tons du thème
       (vert / ambre / rouge / neutre), donc le gabarit ne choisit aucune
       couleur : il recopie le ton.
@@ -85,6 +95,7 @@
 </div>
 
 <script src="{% static 'vendor/bootstrap/bootstrap.bundle.min.js' %}"></script>
+<script src="{% static 'js/compteur-alerte.js' %}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

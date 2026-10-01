@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+
+{% comment %}
+  Les alertes ouvertes puis résolues. Les durées portent data-depuis : le
+  script les fait avancer seconde par seconde sans recharger la page.
+{% endcomment %}
+
+{% block titre %}Alertes — FleetFlow{% endblock %}
+{% block titre_page %}Alertes{% endblock %}
+{% block sous_titre %}
+  {{ ouvertes|length }} ouverte{{ ouvertes|length|pluralize }} ·
+  les {{ resolues|length }} dernière{{ resolues|length|pluralize }} résolue{{ resolues|length|pluralize }}
+{% endblock %}
+
+{% block contenu %}
+
+<div class="ff-pile">
+
+  <div class="ff-carte">
+    <div class="ff-carte__entete">
+      <h2 class="ff-carte__titre">Alertes ouvertes</h2>
+      {% if ouvertes %}
+        {% include "partials/_badge.html" with ton="rouge" libelle=ouvertes|length only %}
+      {% endif %}
+    </div>
+    <div class="ff-tableau-cadre">
+      <table class="ff-tableau">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Concerne</th>
+            <th>Message</th>
+            <th>Depuis</th>
+            <th>Gérant prévenu</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for alerte in ouvertes %}
+            <tr>
+              <td>{{ alerte.get_type_alerte_display }}</td>
+              <td>
+                {% if alerte.vehicule %}
+                  <a class="ff-chiffre" href="{{ alerte.vehicule.get_absolute_url }}">
+                    {{ alerte.vehicule.immatriculation }}
+                  </a>
+                {% elif alerte.chauffeur %}
+                  <a href="{{ alerte.chauffeur.get_absolute_url }}">
+                    {{ alerte.chauffeur.nom }}
+                  </a>
+                {% else %}
+                  <a class="ff-chiffre"
+                     href="{{ alerte.document.vehicule.get_absolute_url }}">
+                    {{ alerte.libelle_objet }}
+                  </a>
+                {% endif %}
+              </td>
+              <td>{{ alerte.message }}</td>
+              <td class="ff-chiffre">
+                <span data-depuis="{{ alerte.ouverte_le|date:'c' }}">
+                  {{ alerte.ouverte_le|timesince }}
+                </span>
+                <span class="ff-sous-ligne ff-chiffre">
+                  depuis le {{ alerte.ouverte_le|date:"d/m/Y H:i" }}
+                </span>
+              </td>
+              <td>
+                {% comment %}
+                  email_envoye_le vide ne veut pas dire « jamais » : l'envoi
+                  est réessayé à chaque passage de verifier_signaux(), par
+                  exemple quand le serveur SMTP était injoignable.
+                {% endcomment %}
+                {% if alerte.email_envoye_le %}
+                  {% include "partials/_badge.html" with ton="vert" libelle="Oui" only %}
+                  <span class="ff-sous-ligne ff-chiffre">
+                    {{ alerte.email_envoye_le|date:"d/m H:i" }}
+                  </span>
+                {% else %}
+                  {% include "partials/_badge.html" with ton="ambre" libelle="En attente" only %}
+                {% endif %}
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="5" class="ff-tableau__vide">
+                Aucune alerte ouverte. Tous les boîtiers remontent, toutes les
+                échéances sont à plus de trente jours.
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="ff-carte">
+    <div class="ff-carte__entete">
+      <h2 class="ff-carte__titre">Alertes résolues</h2>
+    </div>
+    <div class="ff-tableau-cadre">
+      <table class="ff-tableau">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Concerne</th>
+            <th>Ouverte le</th>
+            <th>Résolue le</th>
+            <th>Durée</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for alerte in resolues %}
+            <tr>
+              <td>{{ alerte.get_type_alerte_display }}</td>
+              <td class="ff-chiffre">{{ alerte.libelle_objet }}</td>
+              <td class="ff-chiffre">{{ alerte.ouverte_le|date:"d/m/Y H:i" }}</td>
+              <td class="ff-chiffre">{{ alerte.resolue_le|date:"d/m/Y H:i" }}</td>
+              {# La durée est figée : ces alertes ne portent pas data-depuis. #}
+              <td>{{ alerte.ouverte_le|timesince:alerte.resolue_le }}</td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="5" class="ff-tableau__vide">
+                Aucune alerte résolue pour l'instant.
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="ff-carte__pied">
+      Les cinquante dernières résolutions. Une alerte se résout d'elle-même
+      quand le problème disparaît : un boîtier qui remonte à nouveau, une pièce
+      renouvelée.
+    </div>
+  </div>
+
+</div>
+
+{% endblock %}

@@ -20,6 +20,7 @@ PREFIXES_NAVIGATION = (
     ("plein", "carburant"),
     ("entretien", "entretien"),
     ("document", "documents"),
+    ("alerte", "alertes"),
 )
 
 
@@ -58,4 +59,32 @@ def navigation(request):
     return {
         "nav_actif": nav_actif,
         "initiales_utilisateur": initiales(getattr(request, "user", None)),
+    }
+
+
+def alertes(request):
+    """Les alertes de boîtier muet, pour le bandeau de toutes les pages.
+
+    Une seule requête, et seulement pour un visiteur connecté : un context
+    processor est exécuté à chaque rendu de page, y compris celui du
+    formulaire de connexion. Y poser une requête inutile, c'est la payer sur
+    tout le site.
+
+    L'import est fait dans la fonction et non en tête de module : importer
+    fleet.services au chargement de fleet.context_processors créerait une
+    chaîne d'imports au démarrage de Django (services importe models, qui
+    importe les itinéraires…) alors que la fonction n'est appelée qu'au
+    premier rendu.
+    """
+    from fleet.models import Alerte
+    from fleet.services import alertes_ouvertes
+
+    utilisateur = getattr(request, "user", None)
+    if utilisateur is None or not utilisateur.is_authenticated:
+        return {"alertes_sans_signal": []}
+
+    return {
+        "alertes_sans_signal": list(
+            alertes_ouvertes(type_alerte=Alerte.TypeAlerte.SANS_SIGNAL)
+        )
     }

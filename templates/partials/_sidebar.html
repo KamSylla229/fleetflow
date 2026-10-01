@@ -76,6 +76,20 @@
     <span class="ff-nav__libelle">Documents</span>
   </a>
 
+  <a class="ff-nav__item{% if nav_actif == 'alertes' %} ff-nav__item--actif{% endif %}"
+     href="{% url 'fleet:alerte_liste' %}"
+     {% if nav_actif == 'alertes' %}aria-current="page"{% endif %}>
+    <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
+    <span class="ff-nav__libelle">Alertes</span>
+    {% comment %}
+      Le compteur vient du context processor : il est donc juste sur toutes
+      les pages, sans qu'aucune vue ne s'en occupe.
+    {% endcomment %}
+    {% if alertes_sans_signal %}
+      <span class="ff-badge ff-badge--rouge">{{ alertes_sans_signal|length }}</span>
+    {% endif %}
+  </a>
+
   <span class="ff-nav__item ff-nav__item--bientot">
     <i class="bi bi-journal-text" aria-hidden="true"></i>
     <span class="ff-nav__libelle">Rapports</span>

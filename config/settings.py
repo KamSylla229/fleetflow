@@ -74,6 +74,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 "fleet.context_processors.navigation",
+                "fleet.context_processors.alertes",
             ],
         },
     },
@@ -110,6 +111,35 @@ AUTH_PASSWORD_VALIDATORS = [
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
     },
 ]
+
+
+# E-mail
+# https://docs.djangoproject.com/en/5.2/topics/email/
+
+# Par defaut, les e-mails sont ECRITS DANS LA CONSOLE et n'arrivent nulle
+# part. C'est le defaut prudent : en developpement on veut lire le message,
+# pas le livrer, et surtout on ne veut pas qu'un envoi reel parte par
+# accident pendant une demonstration. Passer en SMTP est une decision
+# explicite, prise dans le .env.
+EMAIL_BACKEND = env(
+    "EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend"
+)
+EMAIL_HOST = env("EMAIL_HOST", default="")
+EMAIL_PORT = env.int("EMAIL_PORT", default=587)
+EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
+EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
+
+# L'expediteur affiche. Un domaine .invalid garantit qu'aucune reponse ne
+# partira vers une vraie boite tant que le projet n'a pas son domaine.
+DEFAULT_FROM_EMAIL = env(
+    "DEFAULT_FROM_EMAIL", default="FleetFlow <ne-pas-repondre@fleetflow.invalid>"
+)
+
+# Destinataire des alertes et du rapport quotidien. Vide par defaut : les
+# services et les commandes doivent le dire clairement plutot que d'envoyer
+# dans le vide.
+FLEETFLOW_EMAIL_GERANT = env("FLEETFLOW_EMAIL_GERANT", default="")
 
 
 # Suivi GPS

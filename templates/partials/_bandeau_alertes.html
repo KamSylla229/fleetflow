@@ -1,0 +1,24 @@
+{% comment %}
+  Les bandeaux de boîtier muet, affichés en haut de toutes les pages.
+
+  Ce fragment est rendu deux fois : par base.html au chargement, et par la vue
+  alerte_bandeau que le script interroge toutes les trente secondes. C'est ce
+  qui fait apparaître une alerte sans que l'utilisateur recharge la page.
+
+  Le compteur porte data-depuis avec la date en ISO 8601 (filtre |date:"c").
+  Le serveur écrit déjà une valeur lisible à l'intérieur : la page est juste
+  même si le script ne tourne jamais.
+{% endcomment %}
+{% for alerte in alertes_sans_signal %}
+  <div class="ff-bandeau ff-bandeau--rouge" role="alert">
+    <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
+    <span class="ff-bandeau__corps">
+      <strong>{{ alerte.vehicule.immatriculation }}</strong> ne remonte plus de
+      données GPS depuis
+      <span data-depuis="{{ alerte.ouverte_le|date:'c' }}">{{ alerte.ouverte_le|timesince }}</span>.
+      Boîtier à vérifier.
+    </span>
+    <a class="ff-btn ff-btn--secondaire ff-btn--petit"
+       href="{% url 'fleet:alerte_liste' %}">Voir les alertes</a>
+  </div>
+{% endfor %}

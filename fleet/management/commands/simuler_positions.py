@@ -137,7 +137,25 @@ class Command(BaseCommand):
                 "itineraire et un signal actif."
             )
 
-        # Phase C branchera ici l'appel a services.verifier_signaux(), qui
-        # ouvrira une alerte et previendra le gerant quand un boitier se tait.
-        # Le point d'insertion est volontairement nomme pour qu'il ne se perde
-        # pas dans la boucle.
+        # Apres avoir bouge la flotte, on regarde qui s'est tu. L'ordre
+        # compte : un camion qui vient de remonter une position doit voir son
+        # alerte resolue dans le meme tick.
+        bilan = services.verifier_signaux(maintenant=maintenant)
+        for alerte in bilan["ouvertes"]:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"  ALERTE ouverte : {alerte.vehicule.immatriculation} "
+                    "ne remonte plus de position."
+                )
+            )
+        for alerte in bilan["resolues"]:
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f"  alerte resolue : {alerte.vehicule.immatriculation} "
+                    "remonte a nouveau."
+                )
+            )
+        for alerte in bilan["reessayees"]:
+            self.stdout.write(
+                f"  nouvel essai d'envoi pour {alerte.vehicule.immatriculation}."
+            )

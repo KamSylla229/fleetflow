@@ -719,3 +719,157 @@ class PositionGPS(models.Model):
             f"{self.latitude}, {self.longitude} "
             f"({self.horodatage:%d/%m/%Y %H:%M})"
         )
+
+
+class Alerte(models.Model):
+    """Un problème ouvert qui attend une action du gestionnaire.
+
+    Deux familles pour l'instant : un boîtier qui ne remonte plus rien, et une
+    échéance proche ou dépassée. Une alerte n'est pas un message : c'est un
+    état. Elle s'ouvre quand le problème apparaît, se résout quand il
+    disparaît, et garde la trace du moment où le gérant a été prévenu.
+
+    Pourquoi un modèle plutôt qu'un simple calcul à l'affichage : parce qu'il
+    faut se souvenir de deux choses qu'aucun calcul ne peut redonner — depuis
+    quand le problème dure, et si l'e-mail est déjà parti. Sans cette mémoire,
+    la simulation enverrait un courriel à chaque tick, soit toutes les cinq
+    secondes.
+
+    Les trois clés étrangères sont facultatives et une seule est renseignée à
+    la fois : un boîtier muet concerne un camion, un permis périmé un
+    chauffeur, une assurance expirée un document. Un modèle par type d'alerte
+    aurait multiplié les tables pour la même logique ; une relation générique
+    (ContentType) aurait rendu les requêtes et les jointures illisibles pour
+    trois cas connus d'avance.
+    """
+
+    class TypeAlerte(models.TextChoices):
+        SANS_SIGNAL = "sans_signal", "Boîtier sans signal"
+        ECHEANCE = "echeance", "Échéance"
+
+    # Le champ s'appelle type_alerte et non « type » : les autres modèles du
+    # projet utilisent déjà type_vehicule, type_entretien et type_document, et
+    # « type » masquerait la fonction intégrée du même nom dans le corps de la
+    # classe.
+    type_alerte = models.CharField(
+        max_length=20,
+        choices=TypeAlerte.choices,
+        verbose_name="Type d'alerte",
+    )
+
+    # on_delete=CASCADE, comme pour les positions : une alerte n'a aucun sens
+    # sans l'objet qu'elle concerne, et il n'y a pas d'historique comptable à
+    # protéger.
+    vehicule = models.ForeignKey(
+        Vehicule,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="alertes",
+        verbose_name="Camion",
+    )
+    chauffeur = models.ForeignKey(
+        Chauffeur,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="alertes",
+        verbose_name="Chauffeur",
+    )
+    document = models.ForeignKey(
+        "Document",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="alertes",
+        verbose_name="Document",
+    )
+
+    message = models.TextField(verbose_name="Message")
+
+    # default=timezone.now et non auto_now_add, pour la même raison que
+    # PositionGPS.horodatage : il faut pouvoir semer une alerte ouverte depuis
+    # trois heures.
+    ouverte_le = models.DateTimeField(
+        default=timezone.now,
+        verbose_name="Ouverte le",
+    )
+    resolue_le = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Résolue le",
+    )
+    # Trace de l'envoi au gérant. Null signifie « pas encore envoyé » : c'est
+    # ce qui permet de réessayer au passage suivant quand le serveur SMTP
+    # était injoignable, sans jamais envoyer deux fois.
+    email_envoye_le = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="E-mail envoyé le",
+    )
+
+    class Meta:
+        ordering = ["resolue_le", "-ouverte_le"]
+        verbose_name = "Alerte"
+        verbose_name_plural = "Alertes"
+        constraints = [
+            # Une seule alerte ouverte par type et par objet concerné. Sans
+            # cette contrainte, la simulation en créerait une par tick.
+            #
+            # Trois contraintes partielles et non une seule sur les trois
+            # colonnes : en SQL, NULL n'est jamais égal à NULL, donc une
+            # contrainte sur (type, vehicule, chauffeur, document) ne
+            # dédoublonnerait rien dès qu'une colonne est vide — c'est-à-dire
+            # toujours, puisque deux des trois le sont.
+            models.UniqueConstraint(
+                fields=["type_alerte", "vehicule"],
+                condition=models.Q(resolue_le__isnull=True, vehicule__isnull=False),
+                name="une_alerte_ouverte_par_camion",
+            ),
+            models.UniqueConstraint(
+                fields=["type_alerte", "chauffeur"],
+                condition=models.Q(resolue_le__isnull=True, chauffeur__isnull=False),
+                name="une_alerte_ouverte_par_chauffeur",
+            ),
+            models.UniqueConstraint(
+                fields=["type_alerte", "document"],
+                condition=models.Q(resolue_le__isnull=True, document__isnull=False),
+                name="une_alerte_ouverte_par_document",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.get_type_alerte_display()} — {self.libelle_objet}"
+
+    @property
+    def objet(self):
+        """L'objet concerné, quel qu'il soit, ou None.
+
+        Évite aux appelants d'écrire trois `if` pour savoir laquelle des trois
+        clés étrangères est renseignée.
+        """
+        return self.vehicule or self.chauffeur or self.document
+
+    @property
+    def libelle_objet(self):
+        """De quoi parle l'alerte, en une ligne lisible."""
+        if self.vehicule_id:
+            return self.vehicule.immatriculation
+        if self.chauffeur_id:
+            return self.chauffeur.nom
+        if self.document_id:
+            return str(self.document)
+        return "objet inconnu"
+
+    @property
+    def est_ouverte(self):
+        return self.resolue_le is None
+
+    @property
+    def duree(self):
+        """Durée du problème : jusqu'à sa résolution, ou jusqu'à maintenant.
+
+        Un timedelta, que le gabarit affiche avec le filtre `timesince`.
+        """
+        fin = self.resolue_le or timezone.now()
+        return fin - self.ouverte_le

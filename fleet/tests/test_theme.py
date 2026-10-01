@@ -47,6 +47,7 @@ class OssatureDesPagesTest(TestCase):
             (reverse("fleet:entretien_liste"), "entretien"),
             (reverse("fleet:entretien_creer"), "entretien"),
             (reverse("fleet:document_liste"), "documents"),
+            (reverse("fleet:alerte_liste"), "alertes"),
         ]
 
     def test_chaque_page_repond_et_porte_la_navigation(self):
@@ -121,6 +122,7 @@ class RessourcesLocalesTest(TestCase):
         "vendor/bootstrap/bootstrap.bundle.min.js",
         "vendor/icones/bootstrap-icons.css",
         "vendor/icones/fonts/bootstrap-icons.woff2",
+        "js/compteur-alerte.js",
     )
 
     def setUp(self):
