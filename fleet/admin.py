@@ -15,8 +15,10 @@ from .models import (
     Chauffeur,
     Document,
     Entretien,
+    FournisseurGPS,
     Mission,
     PleinCarburant,
+    PositionGPS,
     Vehicule,
 )
 
@@ -180,3 +182,39 @@ class DocumentAdmin(admin.ModelAdmin):
         if jours < 0:
             return f"expiré depuis {abs(jours)} j"
         return f"{jours} j"
+
+
+@admin.register(FournisseurGPS)
+class FournisseurGPSAdmin(admin.ModelAdmin):
+    list_display = (
+        "nom",
+        "statut_connexion",
+        "frequence_secondes",
+        "dernier_echange",
+        "camions_appaires",
+    )
+    list_filter = ("statut_connexion",)
+    search_fields = ("nom",)
+
+    @admin.display(description="Camions appairés")
+    def camions_appaires(self, obj):
+        return obj.vehicules.count()
+
+
+@admin.register(PositionGPS)
+class PositionGPSAdmin(admin.ModelAdmin):
+    list_display = (
+        "horodatage",
+        "vehicule",
+        "latitude",
+        "longitude",
+        "vitesse_kmh",
+        "source",
+    )
+    list_filter = ("source", "vehicule__fournisseur_gps")
+    search_fields = ("vehicule__immatriculation",)
+    list_select_related = ("vehicule",)
+    # La table grossit de plusieurs milliers de lignes par jour : une
+    # navigation par date évite de dérouler des pages de pagination pour
+    # retrouver un relevé.
+    date_hierarchy = "horodatage"

@@ -13,6 +13,53 @@ from django.db import models
 from django.urls import reverse
 from django.utils import timezone
 
+from .itineraires import CHOIX_ITINERAIRE, itineraire_par_code
+
+
+class FournisseurGPS(models.Model):
+    """Un prestataire de géolocalisation chez qui des boîtiers sont abonnés.
+
+    Au Bénin, deux acteurs reviennent : Cartrack et Orange Fleet. Chacun
+    expose ses positions à sa façon — interrogation périodique pour l'un,
+    renvoi de flux pour l'autre. Le modèle ne décrit pas ces différences
+    techniques : il garde l'état du raccordement, ce qu'un gestionnaire a
+    besoin de voir quand les positions cessent d'arriver.
+    """
+
+    class StatutConnexion(models.TextChoices):
+        CONNECTE = "connecte", "Connecté"
+        EN_ATTENTE = "en_attente", "En attente"
+        ERREUR = "erreur", "Erreur"
+
+    nom = models.CharField(max_length=60, unique=True, verbose_name="Nom")
+    statut_connexion = models.CharField(
+        max_length=20,
+        choices=StatutConnexion.choices,
+        default=StatutConnexion.EN_ATTENTE,
+        verbose_name="Statut du raccordement",
+    )
+    frequence_secondes = models.PositiveIntegerField(
+        default=30,
+        verbose_name="Fréquence d'interrogation (s)",
+        help_text="Intervalle entre deux relevés de position chez ce fournisseur",
+    )
+    # Mis à jour par la simulation à chaque position créée. Null tant
+    # qu'aucun échange n'a eu lieu : « jamais » et « il y a longtemps » ne
+    # sont pas la même information.
+    dernier_echange = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Dernier échange réussi",
+    )
+
+    class Meta:
+        ordering = ["nom"]
+        verbose_name = "Fournisseur GPS"
+        verbose_name_plural = "Fournisseurs GPS"
+
+    def __str__(self):
+        return self.nom
+
 
 class Vehicule(models.Model):
     """Un véhicule de la flotte (camion, utilitaire, voiture ou moto)."""
@@ -67,6 +114,59 @@ class Vehicule(models.Model):
     # on conserve ainsi tout son historique de missions et d'entretiens.
     actif = models.BooleanField(default=True, verbose_name="Actif")
 
+    # --- Suivi GPS ---------------------------------------------------------
+    # on_delete=SET_NULL et non PROTECT : perdre un fournisseur ne doit pas
+    # bloquer la flotte. Un camion sans boîtier reste un camion ; il remonte
+    # seulement « aucune donnée ».
+    fournisseur_gps = models.ForeignKey(
+        "FournisseurGPS",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="vehicules",
+        verbose_name="Fournisseur GPS",
+    )
+    boitier_id = models.CharField(
+        max_length=40,
+        blank=True,
+        verbose_name="Identifiant du boîtier",
+        help_text="Référence du boîtier chez le fournisseur, par exemple CT-88214",
+    )
+
+    # --- État de la simulation ---------------------------------------------
+    # Ces quatre champs ne décrivent pas le camion mais le pantin qui le
+    # remplace en attendant un vrai boîtier. Ils seront inutiles le jour où
+    # les positions viendront d'un fournisseur ; les garder ici plutôt que
+    # dans une table à part évite une jointure sur chaque tick pour des
+    # données qui disparaîtront ensemble.
+    itineraire = models.CharField(
+        max_length=30,
+        blank=True,
+        choices=CHOIX_ITINERAIRE,
+        verbose_name="Itinéraire simulé",
+    )
+    progression = models.FloatField(
+        default=0,
+        verbose_name="Progression sur l'itinéraire",
+        help_text="0 au départ, 1 à l'arrivée",
+    )
+    direction = models.SmallIntegerField(
+        default=1,
+        choices=((1, "Aller"), (-1, "Retour")),
+        verbose_name="Sens de parcours",
+    )
+    vitesse_nominale_kmh = models.PositiveIntegerField(
+        default=60,
+        verbose_name="Vitesse nominale (km/h)",
+    )
+    # Interrupteur de démonstration : il simule un boîtier muet sans rien
+    # débrancher. C'est ce que bascule « simuler_positions --couper ».
+    signal_coupe = models.BooleanField(
+        default=False,
+        verbose_name="Signal coupé",
+        help_text="Simule un boîtier qui ne remonte plus rien",
+    )
+
     class Meta:
         ordering = ["immatriculation"]
         # Le modèle garde le nom Vehicule (le renommer coûterait une migration
@@ -117,6 +217,27 @@ class Vehicule(models.Model):
         # Le document qui fait foi est celui dont l'échéance est la plus
         # lointaine : c'est le dernier renouvellement enregistré.
         return max(candidats, key=lambda document: document.date_expiration)
+
+    @property
+    def progression_pourcent(self):
+        """Progression sur l'itinéraire, en pourcentage entier (0 à 100).
+
+        Le champ `progression` vaut entre 0 et 1. Multiplier par 100 dans un
+        gabarit demanderait {% widthratio %}, qu'on relit mal ; et la première
+        tentative — « {{ progression|floatformat:0 }}0 % » — affichait
+        tranquillement « 00 % » sans lever la moindre erreur.
+        """
+        return round(self.progression * 100)
+
+    @property
+    def trace(self):
+        """L'objet Itineraire correspondant au code stocké, ou None.
+
+        Le champ garde un code (« cotonou_parakou ») ; la géométrie vit dans
+        fleet/itineraires.py. Cette propriété fait le lien, pour qu'aucun
+        appelant n'ait à connaître le dictionnaire ITINERAIRES.
+        """
+        return itineraire_par_code(self.itineraire)
 
     @property
     def document_assurance(self):
@@ -522,3 +643,79 @@ class Document(models.Model):
         if self.date_expiration is None:
             return None
         return (self.date_expiration - timezone.localdate()).days
+
+
+
+class PositionGPS(models.Model):
+    """Un relevé de position d'un camion, horodaté.
+
+    Alimenté par la simulation en v1 (`manage.py simuler_positions`), par un
+    webhook fournisseur en v2 — d'où le champ `source`, qui dira d'où vient
+    chaque point le jour où les deux coexisteront.
+
+    on_delete=CASCADE, contrairement à tout le reste du projet : une position
+    n'a aucun sens sans son camion, et il n'y a pas d'historique comptable à
+    protéger. Sortir un camion de la flotte ne supprime d'ailleurs rien,
+    puisqu'on ne supprime jamais un camion.
+    """
+
+    class Source(models.TextChoices):
+        SIMULATION = "simulation", "Simulation"
+        WEBHOOK = "webhook", "Webhook fournisseur"
+
+    vehicule = models.ForeignKey(
+        Vehicule,
+        on_delete=models.CASCADE,
+        related_name="positions",
+        verbose_name="Camion",
+    )
+    latitude = models.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        verbose_name="Latitude",
+    )
+    longitude = models.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        verbose_name="Longitude",
+    )
+    vitesse_kmh = models.DecimalField(
+        max_digits=5,
+        decimal_places=1,
+        verbose_name="Vitesse (km/h)",
+    )
+    # default=timezone.now et non auto_now_add : il faut pouvoir semer un
+    # historique daté d'hier, et simuler un boîtier dont le dernier point a
+    # trois heures. auto_now_add écraserait toute valeur fournie.
+    horodatage = models.DateTimeField(
+        default=timezone.now,
+        verbose_name="Horodatage",
+    )
+    source = models.CharField(
+        max_length=20,
+        choices=Source.choices,
+        default=Source.SIMULATION,
+        verbose_name="Source",
+    )
+
+    class Meta:
+        ordering = ["-horodatage", "-pk"]
+        verbose_name = "Position GPS"
+        verbose_name_plural = "Positions GPS"
+        indexes = [
+            # La question posée en permanence est « la dernière position de ce
+            # camion ». Sans cet index composé, chaque réponse demanderait de
+            # parcourir toutes les positions du camion ; la table grossit de
+            # plusieurs milliers de lignes par jour et par camion.
+            models.Index(
+                fields=["vehicule", "-horodatage"],
+                name="position_vehicule_recent",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.vehicule.immatriculation} — "
+            f"{self.latitude}, {self.longitude} "
+            f"({self.horodatage:%d/%m/%Y %H:%M})"
+        )
