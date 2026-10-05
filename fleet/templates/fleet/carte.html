@@ -63,17 +63,16 @@
      data-positions-url="{% url 'fleet:carte_positions' %}"
      data-zoom="{{ zoom }}"
      {% comment %}
-       L'unique ressource de cette page qui vient du réseau. Le fond de carte
-       ne peut pas être local : stocker les tuiles du Bénin représenterait
-       plusieurs gigaoctets. Elle est donc écrite ici, visible, et non cachée
-       au milieu du JavaScript — et la page fonctionne sans elle.
+       La seule ressource de cette page qui viendrait du réseau — et elle est
+       **vide par défaut**. Voir FLEETFLOW_TUILES_URL dans config/settings.py :
+       les tuiles ne peuvent pas être servies en local, mais le projet n'a pas
+       à dépendre d'un serveur bénévole qu'il n'a pas le droit d'utiliser.
 
-       La politique d'usage des tuiles d'OpenStreetMap interdit un trafic
-       commercial soutenu : héberger ses propres tuiles ou prendre un
-       fournisseur est noté dans BACKLOG.md pour la mise en production.
+       Sans adresse, la carte affiche les itinéraires et les camions sur un
+       aplat neutre. C'est un mode de fonctionnement normal, pas une panne.
      {% endcomment %}
-     data-tuiles-url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-     data-tuiles-attribution="&copy; les contributeurs OpenStreetMap">
+     data-tuiles-url="{{ tuiles_url }}"
+     data-tuiles-attribution="{{ tuiles_attribution }}">
 
   <div class="ff-carte ff-carte--plein">
     {% comment %}
@@ -107,6 +106,16 @@
         <span class="ff-marqueur__point ff-marqueur__point--neutre"></span>
         Aucune donnée
       </span>
+      {% if not tuiles_url %}
+        {% comment %}
+          Sans cette ligne, un aplat gris ressemble à une page cassée. Elle dit
+          que c'est un réglage, et où le changer.
+        {% endcomment %}
+        <span class="ff-legende__item ff-legende__item--note">
+          <i class="bi bi-info-circle" aria-hidden="true"></i>
+          Fond de carte non configuré (<code>FLEETFLOW_TUILES_URL</code>)
+        </span>
+      {% endif %}
     </div>
   </div>
 

@@ -25,7 +25,7 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.contrib.staticfiles import finders
 from django.db import connection
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
@@ -312,19 +312,44 @@ class RessourcesDeLaCarteTest(TestCase):
             with self.subTest(chemin=chemin):
                 self.assertIsNotNone(finders.find(chemin))
 
-    def test_les_tuiles_sont_la_seule_ressource_distante(self):
-        """L'exception assumée, et elle doit rester visible.
+    def test_par_defaut_la_page_ne_contacte_aucun_service_exterieur(self):
+        """Le fond de carte est désactivé tant qu'on n'en configure pas un.
 
-        Un fond de carte ne peut pas être local : les tuiles du Bénin
-        représenteraient plusieurs gigaoctets. Le reste de la page — Leaflet,
-        le thème, les polices — est servi depuis static/. Ce test nomme
-        l'exception pour qu'une seconde ne s'ajoute pas en silence.
+        C'est le réglage le plus discuté de la phase D. Les serveurs de tuiles
+        d'OpenStreetMap ont renvoyé « Access blocked » en développement : leur
+        politique d'usage interdit qu'une application en dépende, et elle
+        s'applique sans prévenir. Le projet n'a donc pas de fournisseur par
+        défaut — et, pour la première fois, la Definition of Done « Wi-Fi
+        coupé, tout tient » est vraie de bout en bout.
+
+        Sans fond, la carte reste utilisable : itinéraires et camions sur un
+        aplat neutre.
         """
         contenu = self.client.get(reverse("fleet:carte")).content.decode("utf-8")
-        self.assertIn("tile.openstreetmap.org", contenu)
-
         distants = set(re.findall(r'https?://([^/"\')\s]+)', contenu))
-        self.assertEqual(distants, {"tile.openstreetmap.org"})
+        self.assertEqual(distants, set())
+        # Et la page le dit, pour qu'un aplat gris ne passe pas pour une panne.
+        self.assertIn("Fond de carte non configur", contenu)
+
+    @override_settings(
+        FLEETFLOW_TUILES_URL="https://tuiles.exemple.test/{z}/{x}/{y}.png",
+        FLEETFLOW_TUILES_ATTRIBUTION="Fournisseur d'exemple",
+    )
+    def test_un_fond_configure_devient_le_seul_hote_distant(self):
+        """Et il reste le seul : une seconde adresse ne peut pas s'ajouter en silence."""
+        contenu = self.client.get(reverse("fleet:carte")).content.decode("utf-8")
+        distants = set(re.findall(r'https?://([^/"\')\s]+)', contenu))
+        self.assertEqual(distants, {"tuiles.exemple.test"})
+        self.assertIn("Fournisseur d&#x27;exemple", contenu)
+        self.assertNotIn("Fond de carte non configur", contenu)
+
+    def test_le_script_sait_se_passer_de_fond_de_carte(self):
+        """L'absence de tuiles est un cas normal, pas une branche oubliée."""
+        script = open(finders.find("js/carte.js"), encoding="utf-8").read()
+        self.assertIn("if (tuiles)", script)
+        # L'adresse n'est écrite nulle part dans le script : elle vient d'un
+        # réglage, en passant par un attribut data du gabarit.
+        self.assertNotIn("openstreetmap", script)
 
     def test_les_icones_par_defaut_de_leaflet_ne_sont_pas_utilisees(self):
         """Le piège annoncé : elles donnent des 404 sous Django.

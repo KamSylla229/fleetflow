@@ -1188,6 +1188,10 @@ class CarteView(LoginRequiredMixin, TemplateView):
         contexte["zoom"] = ZOOM_FLOTTE
         contexte["mesure_le"] = timezone.localtime().strftime("%H:%M:%S")
         contexte["seuil_minutes"] = settings.FLEETFLOW_SEUIL_SANS_SIGNAL_MIN
+        # Vide par defaut : voir le commentaire de FLEETFLOW_TUILES_URL dans
+        # config/settings.py. La page sait se passer de fond de carte.
+        contexte["tuiles_url"] = settings.FLEETFLOW_TUILES_URL
+        contexte["tuiles_attribution"] = settings.FLEETFLOW_TUILES_ATTRIBUTION
         return contexte
 
 

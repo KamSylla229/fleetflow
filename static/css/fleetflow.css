@@ -833,6 +833,11 @@ button:focus-visible,
 
 .ff-legende__item { display: inline-flex; align-items: center; gap: 6px; }
 
+/* La note « fond de carte non configure » : discrete, mais elle doit se
+   distinguer des quatre etats, qui sont de l'information metier. */
+.ff-legende__item--note { color: var(--ff-encre-3); }
+.ff-legende__item--note code { font-size: 11px; color: var(--ff-encre-2); }
+
 /* --- Le point qui represente un camion ---------------------------------- */
 /* La meme pastille sert trois fois : sur le plan (dans un divIcon Leaflet),
    dans la legende, et devant chaque ligne de la liste de suivi. Une couleur

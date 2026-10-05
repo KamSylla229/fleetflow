@@ -69,10 +69,18 @@
 
   var plan = L.map(hote, { center: centre, zoom: zoom });
 
-  L.tileLayer(conteneur.getAttribute("data-tuiles-url"), {
-    attribution: conteneur.getAttribute("data-tuiles-attribution"),
-    maxZoom: 18,
-  }).addTo(plan);
+  /* Le fond de carte est optionnel, et son absence n'est pas une panne : sans
+   * adresse configurée, les itinéraires et les camions se dessinent sur
+   * l'aplat neutre de .ff-plan. Voir FLEETFLOW_TUILES_URL dans
+   * config/settings.py — les serveurs de tuiles d'OpenStreetMap sont tenus par
+   * des bénévoles et refusent ce genre de dépendance. */
+  var tuiles = conteneur.getAttribute("data-tuiles-url");
+  if (tuiles) {
+    L.tileLayer(tuiles, {
+      attribution: conteneur.getAttribute("data-tuiles-attribution"),
+      maxZoom: 18,
+    }).addTo(plan);
+  }
 
   /* Les axes parcourus, tracés une fois pour toutes. Ils ne bougent jamais :
    * ce sont des données de fleet/itineraires.py, pas des relevés.

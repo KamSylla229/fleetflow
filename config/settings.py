@@ -150,6 +150,22 @@ FLEETFLOW_EMAIL_GERANT = env("FLEETFLOW_EMAIL_GERANT", default="")
 # l'abaisse a 1 pour qu'on n'attende pas une demi-heure devant l'ecran.
 FLEETFLOW_SEUIL_SANS_SIGNAL_MIN = env.int("FLEETFLOW_SEUIL_SANS_SIGNAL_MIN", default=30)
 
+# Fond de carte de la page Carte. **Vide par defaut, et c'est voulu.**
+#
+# Les tuiles sont la seule chose qu'on ne peut pas servir en local : celles du
+# Benin representent plusieurs gigaoctets. Mais les serveurs d'OpenStreetMap
+# sont tenus par des benevoles, et leur politique d'usage interdit ce genre de
+# dependance — ils renvoient alors une image « Access blocked » a la place de
+# chaque tuile. C'est arrive en developpement, et c'est la raison de ce
+# reglage.
+#
+# Sans adresse, la carte affiche les itineraires et les camions sur un aplat
+# neutre : elle reste utilisable, et l'application ne depend d'aucun service
+# exterieur. Avec une adresse, le fond apparait. Le choix du fournisseur — et
+# le droit de s'en servir — appartient a celui qui deploie.
+FLEETFLOW_TUILES_URL = env("FLEETFLOW_TUILES_URL", default="")
+FLEETFLOW_TUILES_ATTRIBUTION = env("FLEETFLOW_TUILES_ATTRIBUTION", default="")
+
 
 # Messages
 # https://docs.djangoproject.com/en/5.2/ref/contrib/messages/

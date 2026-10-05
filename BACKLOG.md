@@ -225,14 +225,18 @@ Le point « Deux entrées de menu passent sur deux lignes » ci-dessus est réso
 pour moitié : la pastille « bientôt » a disparu de cette entrée en phase D,
 comme prévu. Reste « Fournisseurs GPS ».
 
-### Les tuiles de la carte viennent d'OpenStreetMap
-C'est la seule ressource distante du projet, et c'est assumé : stocker les
-tuiles du Bénin représenterait plusieurs gigaoctets. Mais la politique d'usage
-du serveur de tuiles d'OpenStreetMap interdit un trafic commercial soutenu —
-elle vise les démonstrations et les petits projets, pas une application vendue
-à des transporteurs. Avant toute mise en production : héberger ses propres
-tuiles, ou prendre un fournisseur. L'adresse est écrite dans un attribut
-`data-tuiles-url` du gabarit `carte.html`, un seul endroit à changer.
+### Choisir un fournisseur de tuiles
+Le fond de carte est désactivé par défaut depuis que les serveurs
+d'OpenStreetMap ont renvoyé « Access blocked » en développement : leur
+politique d'usage interdit qu'une application en dépende, et elle est
+appliquée sans prévenir. Vérifié en A/B dans un navigateur sans interface — ce
+n'est pas le `Referrer-Policy` de Django, les tuiles se chargent avec et sans
+cet en-tête ; c'est bien un blocage côté OSM.
+
+Sans fond, la carte reste utilisable : itinéraires et camions sur un aplat
+neutre. Pour un vrai déploiement il faudra un fournisseur avec un contrat et
+une clé (MapTiler, Stadia, Thunderforest…), ou ses propres tuiles. Une seule
+variable à renseigner, `FLEETFLOW_TUILES_URL`, plus son attribution.
 
 ### Regrouper les points quand la flotte grandit
 Au cadrage par défaut, les camions au départ de Cotonou se superposent. Les
