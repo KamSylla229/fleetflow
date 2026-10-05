@@ -756,11 +756,22 @@ def enregistrer_entretien(
 # --- Cumuls et annotations de liste -----------------------------------------
 
 
-def _cumuls_carburant(identifiants):
+def _cumuls_carburant(identifiants, depuis=None):
     """Pour chaque véhicule, le total des litres et des kilomètres mesurables.
 
     « Mesurable » veut dire : entre deux pleins successifs. Le premier plein
     d'un véhicule ne compte pas, puisqu'aucune distance ne lui est rattachée.
+
+    `depuis` restreint le résultat à une fenêtre de temps — les trente
+    derniers jours, par exemple. **L'appariement se fait toujours sur tous les
+    pleins du camion**, et le filtre ne s'applique qu'ensuite, aux paires
+    retenues : celles dont le plein le plus récent tombe dans la fenêtre.
+
+    C'est le point délicat de cette fonction. Filtrer les pleins *avant*
+    d'apparier priverait le premier plein de la fenêtre de son prédécesseur :
+    ses litres seraient comptés sans leur distance, et la consommation
+    affichée exploserait. Le plein juste avant la fenêtre sert donc de point
+    de départ, sans que ses propres litres soient comptés.
 
     Renvoie {pk: (litres, kilometres)} et ne coûte **qu'une requête**, quel
     que soit le nombre de véhicules. C'est la brique commune à la
@@ -781,12 +792,56 @@ def _cumuls_carburant(identifiants):
         litres = Decimal("0")
         kilometres = 0
         for precedent, courant in zip(pleins_du_vehicule, pleins_du_vehicule[1:]):
+            if depuis is not None and courant.date < depuis:
+                continue
             distance = courant.km_compteur - precedent.km_compteur
             if distance > 0:
                 litres += courant.litres
                 kilometres += distance
         cumuls[identifiant] = (litres, kilometres)
     return cumuls
+
+
+# Fenêtre de référence de la consommation affichée au tableau de bord. Trente
+# jours : assez long pour lisser un plein inhabituel, assez court pour qu'une
+# dérive se voie.
+FENETRE_CONSOMMATION_JOURS = 30
+
+
+def consommation_moyenne_ponderee(identifiants=None, depuis=None):
+    """Consommation de la flotte en L/100 km, pondérée par la distance.
+
+    Somme des litres divisée par somme des kilomètres, et non moyenne des
+    consommations par camion : un camion qui a fait 80 km ne doit pas peser
+    autant qu'un camion qui en a fait 3 000. La moyenne arithmétique des
+    consommations individuelles donnerait un chiffre que rien ne vérifie —
+    celui-ci se retrouve en divisant la facture de carburant par les
+    kilomètres du parc.
+
+    Renvoie None, et jamais zéro, quand aucune paire de pleins n'est
+    exploitable : « on ne sait pas encore » n'est pas « la flotte ne consomme
+    rien ». L'écran affiche alors un tiret.
+
+    `identifiants` peut être fourni par un appelant qui a déjà chargé la
+    flotte : cela lui évite une requête de plus.
+    """
+    if identifiants is None:
+        identifiants = list(
+            Vehicule.objects.filter(actif=True).values_list("pk", flat=True)
+        )
+    if depuis is None:
+        depuis = timezone.localdate() - timedelta(days=FENETRE_CONSOMMATION_JOURS)
+
+    cumuls = _cumuls_carburant(identifiants, depuis=depuis)
+    total_litres = sum((litres for litres, _km in cumuls.values()), Decimal("0"))
+    total_km = sum(km for _litres, km in cumuls.values())
+
+    if total_km <= 0:
+        return None
+
+    return (total_litres / Decimal(total_km) * Decimal(100)).quantize(
+        Decimal("0.1"), rounding=ROUND_HALF_UP
+    )
 
 
 def annoter_consommation_moyenne(vehicules):
