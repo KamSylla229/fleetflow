@@ -4,21 +4,29 @@
 {% comment %}
   La carte de la flotte — calquée sur docs/maquette/02-carte.png.
 
-  Trois choses à savoir avant de lire ce gabarit.
+  Quatre choses à savoir avant de lire ce gabarit.
 
-  1. **La page est lisible sans Leaflet.** La liste de droite est rendue par
-     Django : plaques, états GPS, vitesses, heures de relevé. Si le fond de
-     carte ne se charge pas — réseau coupé, tuiles indisponibles —, il reste
-     un tableau de bord GPS parfaitement utilisable. C'est voulu : les
-     camions roulent là où la liaison est mauvaise.
+  1. **Le dessin est un SVG maison, sans aucune bibliothèque.** Les trois axes,
+     les villes et les camions sont tracés par static/js/carte.js dans un
+     repère fixe de 1000 × 700, que le navigateur étire à la place
+     disponible. Rien ne vient du réseau : ni bibliothèque, ni tuile, ni
+     police.
 
-  2. **Les tracés d'itinéraires sont rendus une seule fois**, par
-     {{ … |json_script }}, et non renvoyés par l'endpoint de
-     rafraîchissement. Ils ne changent jamais.
+  2. **La page est lisible sans JavaScript.** La liste de droite est rendue
+     par Django : plaques, états GPS, vitesses, heures de relevé. Si le script
+     ne tourne pas, il reste un tableau de suivi parfaitement utilisable. Le
+     dessin, lui, n'est pas rendu deux fois — un dessin n'est pas une donnée,
+     et le produire en gabarit *et* en JavaScript reviendrait à le maintenir
+     deux fois.
 
-  3. **json_script et non un {{ }} dans du JavaScript.** Le filtre produit une
+  3. **Toute la géométrie est projetée côté serveur**, par
+     fleet/itineraires.py, et livrée en coordonnées du dessin. Le script ne
+     sait rien de la latitude ni du cosinus : la projection n'existe qu'à un
+     seul endroit, où elle est éprouvée sans base de données.
+
+  4. **json_script et non un {{ }} dans du JavaScript.** Le filtre produit une
      balise <script type="application/json"> dont Django échappe le contenu
-     pour ce contexte précis. Écrire `var points = {{ itineraires }};` dans un
+     pour ce contexte précis. Écrire `var points = {{ geometrie }};` dans un
      <script> serait une injection : il suffirait d'un libellé contenant
      </script> pour sortir de la chaîne.
 {% endcomment %}
@@ -49,48 +57,38 @@
 
 {% comment %}
   Les positions initiales voyagent avec la page, et non par un premier appel à
-  l'endpoint : les points sont donc là dès l'ouverture, sans dixième de
+  l'endpoint : les camions sont donc en place dès l'ouverture, sans dixième de
   seconde de carte vide, et sans une requête HTTP de plus. C'est le même
   dictionnaire que celui du JSON — la fonction views._camions_carte est
   traversée par les deux chemins.
+
+  La géométrie, elle, ne voyage **qu'ici** : les axes et les villes ne bougent
+  jamais, et l'endpoint de rafraîchissement ne les renvoie pas.
 {% endcomment %}
 {{ camions|json_script:"carte-camions" }}
-{{ itineraires|json_script:"carte-itineraires" }}
-{{ centre|json_script:"carte-centre" }}
+{{ geometrie|json_script:"carte-geometrie" }}
 
 <div class="ff-grille ff-grille--7-5"
      id="carte-flotte"
-     data-positions-url="{% url 'fleet:carte_positions' %}"
-     data-zoom="{{ zoom }}"
-     {% comment %}
-       La seule ressource de cette page qui viendrait du réseau — et elle est
-       **vide par défaut**. Voir FLEETFLOW_TUILES_URL dans config/settings.py :
-       les tuiles ne peuvent pas être servies en local, mais le projet n'a pas
-       à dépendre d'un serveur bénévole qu'il n'a pas le droit d'utiliser.
-
-       Sans adresse, la carte affiche les itinéraires et les camions sur un
-       aplat neutre. C'est un mode de fonctionnement normal, pas une panne.
-     {% endcomment %}
-     data-tuiles-url="{{ tuiles_url }}"
-     data-tuiles-attribution="{{ tuiles_attribution }}">
+     data-positions-url="{% url 'fleet:carte_positions' %}">
 
   <div class="ff-carte ff-carte--plein">
     {% comment %}
-      Le conteneur de la carte. Leaflet y écrit tout seul ; le message
+      Le conteneur du dessin. Le script y écrit un <svg> ; le message
       ci-dessous est ce que voit un visiteur dont le JavaScript ne tourne pas,
-      et il disparaît dès que Leaflet prend la main.
+      et il disparaît dès que le script prend la main.
     {% endcomment %}
     <div class="ff-plan" id="plan">
       <p class="ff-plan__attente">
-        Chargement du fond de carte… La liste des camions, à droite, est
-        complète sans lui.
+        Dessin de la carte en cours… La liste des camions, à droite, est
+        complète sans elle.
       </p>
     </div>
     <div class="ff-plan__legende">
       {% comment %}
         Les quatre états, dans l'ordre de gravité croissante. Les pastilles
-        portent les mêmes classes que les points de la carte : une couleur
-        changée dans la feuille de style l'est aux deux endroits.
+        portent les mêmes jetons de couleur que les points du dessin : une
+        couleur changée dans la feuille de style l'est aux deux endroits.
       {% endcomment %}
       <span class="ff-legende__item">
         <span class="ff-marqueur__point ff-marqueur__point--vert"></span> En route
@@ -106,16 +104,6 @@
         <span class="ff-marqueur__point ff-marqueur__point--neutre"></span>
         Aucune donnée
       </span>
-      {% if not tuiles_url %}
-        {% comment %}
-          Sans cette ligne, un aplat gris ressemble à une page cassée. Elle dit
-          que c'est un réglage, et où le changer.
-        {% endcomment %}
-        <span class="ff-legende__item ff-legende__item--note">
-          <i class="bi bi-info-circle" aria-hidden="true"></i>
-          Fond de carte non configuré (<code>FLEETFLOW_TUILES_URL</code>)
-        </span>
-      {% endif %}
     </div>
   </div>
 
@@ -147,7 +135,16 @@
             {% if camion.vitesse is not None %}
               <span class="ff-suivi__vitesse">{{ camion.vitesse }} km/h</span>
             {% endif %}
-            {% if camion.vu_le %}
+            {% comment %}
+              Pour un boîtier muet, l'heure du dernier contact ne suffit pas :
+              ce qu'on veut lire, c'est depuis combien de temps il se tait. Le
+              script fait avancer ce compteur à partir de age_secondes.
+            {% endcomment %}
+            {% if camion.statut == "sans_signal" %}
+              <span class="ff-sous-ligne" data-age="{{ camion.age_secondes }}">
+                depuis {{ camion.vu_le }}
+              </span>
+            {% elif camion.vu_le %}
               <span class="ff-sous-ligne">{{ camion.vu_le }}</span>
             {% endif %}
           </span>
@@ -165,16 +162,6 @@
 
 {% endblock %}
 
-{% block styles %}
-  <link rel="stylesheet" href="{% static 'vendor/leaflet/leaflet.css' %}">
-{% endblock %}
-
 {% block scripts %}
-  {% comment %}
-    Leaflet avant carte.js : le second utilise le `L` global que le premier
-    installe. Les deux sont servis depuis static/vendor et static/js, aucun
-    CDN.
-  {% endcomment %}
-  <script src="{% static 'vendor/leaflet/leaflet.js' %}"></script>
   <script src="{% static 'js/carte.js' %}"></script>
 {% endblock %}

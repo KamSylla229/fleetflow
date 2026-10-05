@@ -38,7 +38,15 @@ from django.views.generic import (
 
 from . import services
 from .echeances import classer_echeances, collecter_echeances
-from .itineraires import CENTRE_FLOTTE, ZOOM_FLOTTE, itineraire_par_code
+from .itineraires import (
+    ITINERAIRES,
+    VUE_HAUTEUR,
+    VUE_LARGEUR,
+    cadre_projection,
+    itineraire_par_code,
+    latitude_cote,
+    projeter,
+)
 from .kpi import calculer_kpi
 from .forms import (
     ChauffeurForm,
@@ -1071,12 +1079,24 @@ def _camions_carte(maintenant=None):
     )
     missions = services.missions_en_cours_par_vehicule(vehicules)
 
+    # Calculé une fois pour toute la flotte : la projection est une fonction
+    # pure, mais recalculer la boîte englobante pour chaque camion serait
+    # vingt-six parcours des trois itinéraires pour un résultat constant.
+    cadre = cadre_projection()
+
     camions = []
     for vehicule in vehicules:
         statut = services.statut_gps(vehicule, maintenant=maintenant)
         mission = missions.get(vehicule.pk)
         horodatage = vehicule.gps_horodatage
         vitesse = vehicule.gps_vitesse_kmh
+
+        if vehicule.gps_latitude is None or vehicule.gps_longitude is None:
+            projection = (None, None)
+        else:
+            projection = projeter(
+                float(vehicule.gps_latitude), float(vehicule.gps_longitude), cadre
+            )
 
         camions.append(
             {
@@ -1092,6 +1112,13 @@ def _camions_carte(maintenant=None):
                 "lon": float(vehicule.gps_longitude)
                 if vehicule.gps_longitude is not None
                 else None,
+                # Position dans le dessin, projetée **ici**. Le script ne
+                # connaît aucune géographie : s'il projetait lui-même, la
+                # formule existerait en deux exemplaires, dans deux langages,
+                # et les deux finiraient par diverger. C'est la règle déjà
+                # appliquée au formatage des nombres du tableau de bord.
+                "x": projection[0],
+                "y": projection[1],
                 "statut": statut.code,
                 "statut_libelle": statut.libelle,
                 # Le même ton que partout ailleurs dans le thème : la couleur
@@ -1105,6 +1132,14 @@ def _camions_carte(maintenant=None):
                 # obligerait à écrire son formatage une seconde fois en
                 # JavaScript.
                 "vu_le": timezone.localtime(horodatage).strftime("%H:%M")
+                if horodatage is not None
+                else None,
+                # Âge du dernier contact, en secondes, à l'instant de la
+                # requête. Le navigateur y ajoute le temps écoulé depuis la
+                # réponse : le compteur « il y a 2 h 59 » avance donc sans
+                # jamais dépendre de l'horloge du poste, qui peut être fausse
+                # de plusieurs heures sans que personne ne s'en doute.
+                "age_secondes": int((maintenant - horodatage).total_seconds())
                 if horodatage is not None
                 else None,
                 # Un signal coupé est une décision — l'interrupteur de
@@ -1133,8 +1168,8 @@ def _compteurs_carte(camions):
     return compteurs
 
 
-def _itineraires_carte(camions):
-    """Les polylignes des axes effectivement parcourus par la flotte.
+def _geometrie_carte(camions):
+    """Le décor du dessin : axes, villes et trait de côte, déjà projetés.
 
     **Zéro requête.** Les codes d'itinéraire viennent de la liste de camions
     déjà chargée, et `itineraire_par_code` lit le dictionnaire de
@@ -1142,38 +1177,60 @@ def _itineraires_carte(camions):
     du tableau de bord, appliquée d'avance : ne jamais recharger ce qu'on a
     déjà en main.
 
-    Ces tracés ne changent jamais : ils sont rendus **une fois** avec la page,
-    et l'endpoint de rafraîchissement ne les renvoie pas. Les réexpédier
-    toutes les dix secondes serait payer une donnée figée au prix d'une donnée
-    vivante.
+    Tout est projeté **ici**, en coordonnées du dessin. Le script reçoit des x
+    et des y, et ne sait rien de la latitude ni du cosinus : la projection
+    n'existe qu'à un seul endroit, `fleet/itineraires.py`, où elle est testée
+    sans base de données.
 
-    Seuls les axes d'au moins un camion actif sont envoyés : afficher les
+    Ce décor ne change jamais : il est rendu **une fois** avec la page, et
+    l'endpoint de rafraîchissement ne le renvoie pas. Le réexpédier toutes les
+    cinq secondes serait payer une donnée figée au prix d'une donnée vivante.
+
+    Seuls les axes d'au moins un camion actif sont dessinés : afficher les
     trois alors que la flotte n'en suit qu'un encombrerait la carte sans rien
-    apprendre.
+    apprendre. Le cadrage, lui, est calculé sur les trois — c'est ce qui fait
+    qu'il ne bouge pas quand la flotte change d'axe.
     """
+    cadre = cadre_projection()
     codes = {camion["itineraire"] for camion in camions if camion["itineraire"]}
+
     traces = []
+    villes = {}
     for code in sorted(codes):
         itineraire = itineraire_par_code(code)
         if itineraire is None:
             continue
+        points = []
+        for nom, latitude, longitude in itineraire.etapes:
+            x, y = projeter(latitude, longitude, cadre)
+            points.append([x, y])
+            # Un dictionnaire indexé par nom : Cotonou est le départ des trois
+            # axes, et son point ne doit être dessiné qu'une fois.
+            villes[nom] = {"nom": nom, "x": x, "y": y}
         traces.append(
-            {
-                "code": itineraire.code,
-                "libelle": itineraire.libelle,
-                "points": [[latitude, longitude] for latitude, longitude in itineraire.points],
-            }
+            {"code": itineraire.code, "libelle": itineraire.libelle, "points": points}
         )
-    return traces
+
+    return {
+        "largeur": VUE_LARGEUR,
+        "hauteur": VUE_HAUTEUR,
+        "itineraires": traces,
+        "villes": sorted(villes.values(), key=lambda ville: ville["nom"]),
+        # Ordonnée du trait de côte. La longitude passée est sans effet — y ne
+        # dépend que de la latitude — mais il faut bien en donner une, et
+        # celle du milieu du pays évite de laisser croire le contraire.
+        "cote_y": projeter(latitude_cote(), 2.2, cadre)[1],
+    }
 
 
 class CarteView(LoginRequiredMixin, TemplateView):
     """La carte de la flotte : un point par camion, coloré par son état GPS.
 
     La page est lisible sans qu'une ligne de JavaScript ne tourne : la liste
-    latérale est rendue par Django, avec les positions, les vitesses et les
-    heures de relevé. Leaflet n'ajoute que le fond de carte — et il est servi
-    depuis static/vendor, comme Bootstrap.
+    latérale est rendue par Django, avec les états, les vitesses et les heures
+    de relevé. Le dessin, lui, est construit par le script — un dessin n'est
+    pas une donnée, et le rendre deux fois, une fois en gabarit et une fois en
+    JavaScript, reviendrait à le maintenir deux fois.
     """
 
     template_name = "fleet/carte.html"
@@ -1183,9 +1240,7 @@ class CarteView(LoginRequiredMixin, TemplateView):
         camions = _camions_carte()
         contexte["camions"] = camions
         contexte["compteurs"] = _compteurs_carte(camions)
-        contexte["itineraires"] = _itineraires_carte(camions)
-        contexte["centre"] = list(CENTRE_FLOTTE)
-        contexte["zoom"] = ZOOM_FLOTTE
+        contexte["geometrie"] = _geometrie_carte(camions)
         contexte["mesure_le"] = timezone.localtime().strftime("%H:%M:%S")
         contexte["seuil_minutes"] = settings.FLEETFLOW_SEUIL_SANS_SIGNAL_MIN
         # Vide par defaut : voir le commentaire de FLEETFLOW_TUILES_URL dans

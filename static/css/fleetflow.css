@@ -35,6 +35,10 @@
   --ff-vert-fond:       #E7F1E9;
   --ff-vert-bord:       #B4D6C1;
 
+  /* L'ambre plein, jusqu'ici ecrit en dur dans .ff-marqueur__point--ambre.
+     Devenu un jeton le jour ou le dessin de la carte en a eu besoin : la
+     meme couleur a deux endroits doit avoir un seul nom. */
+  --ff-ambre:           #C8881F;
   --ff-ambre-texte:     #8F5A12;
   --ff-ambre-fond:      #FAF0DD;
 
@@ -43,6 +47,17 @@
   --ff-rouge-bord:      #F0D2CF;
 
   --ff-neutre-fond:     #EEF0EC;
+
+  /* Le dessin de la page Carte. Des teintes a part : ce sont des surfaces
+     geographiques — terre, eau, bitume — et non des etats de l'application.
+     Les melanger aux jetons de ton ferait croire qu'elles portent une
+     information, alors qu'elles ne sont qu'un decor. */
+  --ff-carte-fond-haut: #F4F6F1;
+  --ff-carte-fond-bas:  #E9EDE5;
+  --ff-carte-terre:     #DCE8D6;
+  --ff-carte-eau:       #CFE3EC;
+  --ff-carte-route-bord:#D8AE7A;
+  --ff-carte-route:     #E3B98A;
 
   --ff-rayon-carte:     12px;
   --ff-rayon-bouton:    8px;
@@ -793,25 +808,36 @@ button:focus-visible,
 .ff-carte--etiree { display: flex; flex-direction: column; }
 .ff-carte--etiree > .ff-carte__corps { flex: 1 1 auto; }
 
-/* --- 18 quater. Carte de la flotte -------------------------------------- */
+/* --- 18 quater. Carte de la flotte (dessin SVG) -------------------------- */
 /* Attention au vocabulaire : dans ce theme, `.ff-carte` est une *carte* au
-   sens d'un bloc de contenu — il y en a sur toutes les pages. Le fond de
-   carte geographique s'appelle donc `.ff-plan`, pour qu'aucune relecture ne
-   confonde les deux. */
+   sens d'un bloc de contenu — il y en a sur toutes les pages. Le dessin
+   geographique s'appelle donc `.ff-plan`, pour qu'aucune relecture ne
+   confonde les deux.
+
+   TOUTES les couleurs du dessin sont ici. static/js/carte.js ne pose que des
+   classes et des coordonnees : une teinte se corrige dans ce fichier, a un
+   seul endroit, et jamais dans du JavaScript. */
 
 .ff-grille--7-5 { grid-template-columns: 7fr 5fr; }
 
-/* La carte qui contient le plan n'a pas de rembourrage : le fond de carte
-   touche ses bords, comme sur la maquette. */
+/* La carte qui contient le plan n'a pas de rembourrage : le dessin touche ses
+   bords, comme sur la maquette. */
 .ff-carte--plein { padding: 0; overflow: hidden; }
 
 .ff-plan {
   height: clamp(340px, 62vh, 640px);
-  /* Un fond neutre sous les tuiles : si elles ne se chargent pas, on voit un
-     aplat propre avec les traces et les points dessus, et non un rectangle
-     blanc qui ressemble a une page cassee. */
-  background: var(--ff-neutre-fond);
+  /* Le degrade de fond est porte par le conteneur et non par le SVG : un
+     <linearGradient> demanderait des <stop stop-color> construits en
+     JavaScript, donc des couleurs dans le script. */
+  background: linear-gradient(
+    160deg,
+    var(--ff-carte-fond-haut),
+    var(--ff-carte-fond-bas)
+  );
+  overflow: hidden;
 }
+
+.ff-plan__svg { display: block; width: 100%; height: 100%; }
 
 .ff-plan__attente {
   padding: 24px;
@@ -819,6 +845,123 @@ button:focus-visible,
   font-size: 13px;
   color: var(--ff-encre-3);
 }
+
+.ff-plan__terre { fill: var(--ff-carte-terre); opacity: 0.55; }
+.ff-plan__eau   { fill: var(--ff-carte-eau);   opacity: 0.8; }
+
+/* --- Les axes routiers --------------------------------------------------- */
+/* Deux traces superposes : un contour large et pale, puis un trait plus fin
+   par-dessus. C'est ce qui donne l'epaisseur d'une route plutot que celle
+   d'un trait de crayon, sans filtre ni dégradé. Les bouts arrondis evitent
+   les angles coupants aux extremites et aux sommets. */
+
+.ff-route__contour,
+.ff-route__trait {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ff-route__contour {
+  stroke: var(--ff-carte-route-bord);
+  stroke-width: 8;
+  opacity: 0.5;
+}
+
+.ff-route__trait {
+  stroke: var(--ff-carte-route);
+  stroke-width: 5;
+}
+
+/* --- Les villes ---------------------------------------------------------- */
+
+.ff-ville__point { fill: var(--ff-encre-3); }
+
+.ff-ville__nom {
+  fill: var(--ff-encre-2);
+  font-family: var(--ff-texte);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* --- Les camions --------------------------------------------------------- */
+
+.ff-camion {
+  /* Quatre secondes lineaires pour cinq secondes entre deux releves : la
+     transition a le temps de finir, et les camions sont presque toujours en
+     mouvement a l'ecran. Le script pose style.transform et non l'attribut
+     SVG transform, qui ne s'anime pas. */
+  transition: transform 4s linear;
+}
+
+/* Un camion qui vient d'apparaitre se pose a sa place ; sans cette classe il
+   glisserait depuis le coin superieur gauche du dessin. Le script la retire a
+   la frame suivante. */
+.ff-camion--pose { transition: none; }
+
+.ff-camion__point {
+  stroke: var(--ff-surface);
+  stroke-width: 2;
+}
+
+.ff-camion--vert   .ff-camion__point { fill: var(--ff-vert); }
+.ff-camion--ambre  .ff-camion__point { fill: var(--ff-ambre); }
+.ff-camion--rouge  .ff-camion__point { fill: var(--ff-rouge-texte); }
+.ff-camion--neutre .ff-camion__point { fill: var(--ff-encre-3); }
+
+/* La pulsation marque le *mouvement*, pas la couleur : elle n'est allumee que
+   pour « en route ». Un camion a l'arret est immobile a l'ecran comme sur la
+   route — c'est l'information la plus vite lue de toute la page. */
+.ff-camion__pulsation { display: none; }
+
+.ff-camion--anime .ff-camion__pulsation {
+  display: block;
+  fill: var(--ff-vert);
+  opacity: 0.25;
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: ff-pulsation 1.6s ease-out infinite;
+}
+
+@keyframes ff-pulsation {
+  from { transform: scale(1);   opacity: 0.25; }
+  to   { transform: scale(2.4); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Une pulsation permanente est penible pour qui y est sensible, et le
+     glissement des camions encore plus. Les deux s'arretent, la couleur
+     continue de porter l'information. */
+  .ff-camion { transition: none; }
+  .ff-camion--anime .ff-camion__pulsation { animation: none; }
+}
+
+/* L'anneau pointille du camion choisi dans la liste. */
+.ff-camion__selection { display: none; }
+
+.ff-camion--choisi .ff-camion__selection {
+  display: block;
+  fill: none;
+  stroke: var(--ff-marque);
+  stroke-width: 2;
+  stroke-dasharray: 3 3;
+}
+
+.ff-camion__plaque {
+  fill: var(--ff-encre);
+  font-family: var(--ff-chiffre);
+  font-size: 11px;
+  font-weight: 600;
+  /* Le contour blanc detache la plaque de la route et de la terre, quelle que
+     soit la couleur dessous. paint-order place le trace du contour AVANT
+     celui du texte : sans lui, le contour mangerait le texte par l'interieur
+     et le rendrait baveux. */
+  stroke: var(--ff-surface);
+  stroke-width: 3;
+  paint-order: stroke;
+}
+
+/* --- La legende ---------------------------------------------------------- */
 
 .ff-plan__legende {
   display: flex;
@@ -833,80 +976,22 @@ button:focus-visible,
 
 .ff-legende__item { display: inline-flex; align-items: center; gap: 6px; }
 
-/* La note « fond de carte non configure » : discrete, mais elle doit se
-   distinguer des quatre etats, qui sont de l'information metier. */
-.ff-legende__item--note { color: var(--ff-encre-3); }
-.ff-legende__item--note code { font-size: 11px; color: var(--ff-encre-2); }
-
-/* --- Le point qui represente un camion ---------------------------------- */
-/* La meme pastille sert trois fois : sur le plan (dans un divIcon Leaflet),
-   dans la legende, et devant chaque ligne de la liste de suivi. Une couleur
-   corrigee l'est donc aux trois endroits. */
-
+/* La pastille de la legende et celle de la liste de suivi : la meme que le
+   point du dessin, en HTML cette fois. Les deux lisent les memes jetons. */
 .ff-marqueur__point {
   display: inline-block;
   width: 11px;
   height: 11px;
   border-radius: 999px;
   background: var(--ff-encre-3);
-  /* L'anneau blanc detache le point des tuiles, quelle que soit la couleur
-     de la route en dessous. */
-  box-shadow: 0 0 0 2px #FFFFFF, 0 1px 3px rgba(15, 26, 20, 0.35);
+  box-shadow: 0 0 0 2px var(--ff-surface), 0 1px 3px rgba(15, 26, 20, 0.35);
   flex: 0 0 auto;
 }
 
 .ff-marqueur__point--vert   { background: var(--ff-vert); }
-.ff-marqueur__point--ambre  { background: #C8881F; }
+.ff-marqueur__point--ambre  { background: var(--ff-ambre); }
 .ff-marqueur__point--rouge  { background: var(--ff-rouge-texte); }
 .ff-marqueur__point--neutre { background: var(--ff-encre-3); }
-
-/* Leaflet donne a tout divIcon un fond blanc et une bordure grise. Deux
-   classes dans le selecteur : la regle gagne quel que soit l'ordre dans
-   lequel leaflet.css et fleetflow.css sont charges. C'est aussi la raison
-   pour laquelle on n'utilise PAS les icones par defaut de Leaflet, qui
-   reclameraient marker-icon.png et marker-shadow.png par des chemins que
-   Django ne sert pas la ou Leaflet les cherche. */
-.ff-marqueur.leaflet-div-icon {
-  background: transparent;
-  border: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* L'etiquette de plaque posee a cote du point. */
-.ff-plan .leaflet-tooltip.ff-etiquette-plan {
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid var(--ff-bordure);
-  border-radius: 6px;
-  box-shadow: none;
-  padding: 1px 6px;
-  font-family: var(--ff-chiffre);
-  font-size: 11px;
-  color: var(--ff-encre);
-  white-space: nowrap;
-}
-/* La fleche de l'etiquette est laissee en place : l'etiquette apparait au
-   survol, au-dessus du point, et c'est elle qui dit lequel. */
-
-.ff-plan .leaflet-popup-content-wrapper {
-  border-radius: var(--ff-rayon-carte);
-}
-.ff-plan .leaflet-popup-content {
-  margin: 12px 14px;
-  font-family: var(--ff-texte);
-  font-size: 13px;
-  color: var(--ff-encre);
-}
-
-.ff-popup__plaque {
-  display: block;
-  font-family: var(--ff-chiffre);
-  font-weight: 600;
-  font-size: 14px;
-  margin-bottom: 4px;
-}
-.ff-popup__ligne { display: block; color: var(--ff-encre-2); }
 
 /* --- La liste de suivi, a droite du plan -------------------------------- */
 
@@ -928,7 +1013,7 @@ button:focus-visible,
 .ff-suivi__mesures { text-align: right; white-space: nowrap; }
 .ff-suivi__vitesse { font-size: 13px; }
 
-/* La ligne du camion dont la bulle est ouverte sur le plan. */
+/* La ligne du camion choisi : le pendant de l'anneau pointille sur le plan. */
 .ff-suivi--actif { background: var(--ff-vert-fond); }
 
 @media (max-width: 991px) {
