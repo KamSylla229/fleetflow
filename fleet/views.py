@@ -34,6 +34,7 @@ from django.views.generic import (
 )
 
 from . import services
+from .echeances import classer_echeances, collecter_echeances
 from .forms import (
     ChauffeurForm,
     ClotureMissionForm,
@@ -694,6 +695,22 @@ class EntretienListView(ListeFiltrableView):
             entretien.statut = services.statut_prochain_entretien(
                 entretien, entretien.vehicule.kilometrage
             )
+
+        # Les échéances datées, classées par le module echeances : la page
+        # n'additionne ni ne trie rien. Les dépassées arrivent en premier
+        # parce que classer_echeances les livre dans cet ordre.
+        classement = classer_echeances(collecter_echeances())
+        contexte["classement"] = classement
+        contexte["total_sous_60"] = (
+            len(classement["depassees"])
+            + len(classement["sous_30_j"])
+            + len(classement["sous_60_j"])
+        )
+
+        # Le total porte sur l'année civile, pas sur les lignes filtrées : c'est
+        # le chiffre que cherche un gérant, et le libellé du tableau le dit.
+        contexte["annee"] = timezone.localdate().year
+        contexte["cout_annuel"] = services.cout_entretiens_annee(contexte["annee"])
 
         contexte.update(_contexte_periode(self.request))
         contexte["vehicules"] = Vehicule.objects.all()

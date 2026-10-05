@@ -1,0 +1,46 @@
+{% comment %}
+  Une des trois colonnes de la page Entretien. Paramètres :
+
+    titre    — « Dépassées », « Sous 30 jours », « Sous 60 jours »
+    items    — une liste d'EcheanceClassee, déjà triée par classer_echeances
+    variante — "rouge", "ambre", ou rien pour l'en-tête blanc
+    vide     — le texte affiché quand la colonne est vide
+
+  Appel : {% include "partials/_colonne_echeances.html" with titre=… items=… only %}
+
+  Le « only » est important : sans lui, l'include hérite de tout le contexte
+  de la page, et une variable `items` laissée par une inclusion précédente
+  afficherait la mauvaise colonne sans la moindre erreur.
+
+  Le nombre de jours est en police à chasse fixe et aligné à droite : les
+  trois colonnes se lisent alors comme une seule liste de priorités.
+{% endcomment %}
+<div class="ff-carte">
+  <div class="ff-carte__entete{% if variante %} ff-carte__entete--{{ variante }}{% endif %}">
+    <h2 class="ff-carte__titre">{{ titre }}</h2>
+    <span class="ff-carte__compteur">{{ items|length }}</span>
+  </div>
+  <div class="ff-carte__corps">
+    {% for item in items %}
+      <div class="ff-echeance">
+        <span class="ff-echeance__libelle">
+          {% if item.url %}
+            <a href="{{ item.url }}">{{ item.libelle }}</a>
+          {% else %}
+            {{ item.libelle }}
+          {% endif %}
+          <span class="ff-sous-ligne">{{ item.detail }}</span>
+        </span>
+        {% comment %}
+          Le signe est porté par la valeur : jours vaut -17 pour un retard de
+          dix-sept jours. Rien à calculer ici.
+        {% endcomment %}
+        <span class="ff-echeance__jours{% if variante %} ff-echeance__jours--{{ variante }}{% endif %}">
+          {{ item.jours }} j
+        </span>
+      </div>
+    {% empty %}
+      <p class="ff-champ__aide mb-0">{{ vide }}</p>
+    {% endfor %}
+  </div>
+</div>

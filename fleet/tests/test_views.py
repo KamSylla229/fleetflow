@@ -877,3 +877,163 @@ class AffichageDesFormulairesTest(VueConnecteeTest):
         )
         self.assertContains(reponse, "ff-bandeau--rouge")
         self.assertContains(reponse, "en cours")
+
+
+class PageEntretienTest(VueConnecteeTest):
+    """La page « Entretien, assurances et documents » (maquette 05).
+
+    Trois colonnes d'échéances datées en haut, l'historique kilométrique en
+    bas, et un total annuel. La page ne calcule rien : tout vient de
+    echeances.classer_echeances() et de services.cout_entretiens_annee().
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.vehicule = creer_vehicule(immatriculation="GH 3456 RB")
+
+    def _document(self, jours, type_document=None, **champs):
+        return creer_document(
+            self.vehicule,
+            type_document or Document.TypeDocument.ASSURANCE,
+            jours=jours,
+            **champs,
+        )
+
+    def _entretien(self, cout="85000", jours=10, km=5_000):
+        return Entretien.objects.create(
+            vehicule=self.vehicule,
+            type_entretien=Entretien.TypeEntretien.VIDANGE,
+            date=self.aujourdhui - timedelta(days=jours),
+            km=km,
+            cout=Decimal(cout),
+            prestataire="Garage Akpakpa",
+            prochaine_echeance_km=km + 5_000,
+        )
+
+    def test_les_trois_colonnes_sont_presentes(self):
+        reponse = self.client.get(reverse("fleet:entretien_liste"))
+        self.assertEqual(reponse.status_code, 200)
+        self.assertContains(reponse, "Entretien, assurances et documents")
+        for titre in ["Dépassées", "Sous 30 jours", "Sous 60 jours"]:
+            with self.subTest(colonne=titre):
+                self.assertContains(reponse, titre)
+
+    def test_une_piece_depassee_s_affiche_en_rouge(self):
+        self._document(jours=-17, type_document=Document.TypeDocument.VISITE_TECHNIQUE)
+
+        reponse = self.client.get(reverse("fleet:entretien_liste"))
+
+        self.assertContains(reponse, "Visite technique — GH 3456 RB")
+        self.assertContains(reponse, "-17 j")
+        self.assertContains(reponse, "ff-carte__entete--rouge")
+        self.assertContains(reponse, "ff-echeance__jours--rouge")
+
+    def test_chaque_echeance_tombe_dans_sa_colonne(self):
+        self._document(jours=-3, type_document=Document.TypeDocument.ASSURANCE)
+        self._document(jours=12, type_document=Document.TypeDocument.VISITE_TECHNIQUE)
+        self._document(jours=45, type_document=Document.TypeDocument.LICENCE_TRANSPORT)
+
+        classement = self.client.get(reverse("fleet:entretien_liste")).context[
+            "classement"
+        ]
+
+        self.assertEqual([item.jours for item in classement["depassees"]], [-3])
+        self.assertEqual([item.jours for item in classement["sous_30_j"]], [12])
+        self.assertEqual([item.jours for item in classement["sous_60_j"]], [45])
+
+    def test_les_depassees_sont_listees_de_la_plus_en_retard_a_la_moins(self):
+        autre = creer_vehicule(immatriculation="AB 1234 RB")
+        self._document(jours=-4)
+        creer_document(autre, Document.TypeDocument.ASSURANCE, jours=-40)
+
+        classement = self.client.get(reverse("fleet:entretien_liste")).context[
+            "classement"
+        ]
+        self.assertEqual([item.jours for item in classement["depassees"]], [-40, -4])
+
+    def test_le_permis_figure_parmi_les_echeances(self):
+        creer_chauffeur(date_expiration_permis=self.aujourdhui + timedelta(days=19))
+        reponse = self.client.get(reverse("fleet:entretien_liste"))
+        self.assertContains(reponse, "Permis —")
+        self.assertContains(reponse, "19 j")
+
+    def test_une_piece_sans_date_n_apparait_pas(self):
+        self._document(
+            jours=0, type_document=Document.TypeDocument.CARTE_GRISE,
+            date_expiration=None,
+        )
+        reponse = self.client.get(reverse("fleet:entretien_liste"))
+        self.assertEqual(reponse.context["total_sous_60"], 0)
+        self.assertContains(reponse, "Aucune pièce dépassée")
+
+    def test_une_echeance_lointaine_n_apparait_pas(self):
+        self._document(jours=300)
+        reponse = self.client.get(reverse("fleet:entretien_liste"))
+        self.assertEqual(reponse.context["total_sous_60"], 0)
+
+    def test_le_sous_titre_compte_les_echeances(self):
+        self._document(jours=-5, type_document=Document.TypeDocument.ASSURANCE)
+        self._document(jours=20, type_document=Document.TypeDocument.VISITE_TECHNIQUE)
+        self._document(jours=50, type_document=Document.TypeDocument.LICENCE_TRANSPORT)
+
+        reponse = self.client.get(reverse("fleet:entretien_liste"))
+
+        self.assertEqual(reponse.context["total_sous_60"], 3)
+        self.assertContains(reponse, "3 échéances sous 60 jours")
+        self.assertContains(reponse, "1 dépassée")
+
+    def test_le_total_annuel_est_affiche(self):
+        self._entretien(cout="85000")
+        self._entretien(cout="620000", km=6_000)
+
+        reponse = self.client.get(reverse("fleet:entretien_liste"))
+
+        self.assertEqual(reponse.context["cout_annuel"], Decimal("705000"))
+        self.assertContains(reponse, f"Coût des entretiens sur {self.aujourdhui.year}")
+        # intcomma sépare les milliers par une espace insécable en fr-fr.
+        self.assertContains(reponse, "705 000 F")
+
+    def test_le_total_annuel_ignore_les_filtres(self):
+        """C'est le chiffre de l'année, pas celui des lignes affichées.
+
+        Un total qui changerait avec les filtres n'aurait aucun sens comme
+        indicateur de dépense annuelle — et le libellé du tableau le dit.
+        """
+        self._entretien(cout="85000")
+        self._entretien(cout="620000", km=6_000)
+
+        reponse = self.client.get(
+            reverse("fleet:entretien_liste"), {"type": "pneus"}
+        )
+
+        self.assertEqual(len(reponse.context["entretiens"]), 0)
+        self.assertEqual(reponse.context["cout_annuel"], Decimal("705000"))
+
+    def test_l_historique_garde_son_badge_kilometrique(self):
+        """Les deux natures d'échéance cohabitent sans se mélanger.
+
+        En haut, des jours ; en bas, des kilomètres. C'est la raison pour
+        laquelle les entretiens ne sont pas dans les trois colonnes.
+        """
+        self._entretien(km=1_000)  # échéance à 6 000 km, compteur à 100 000
+        reponse = self.client.get(reverse("fleet:entretien_liste"))
+        self.assertContains(reponse, "Garage Akpakpa")
+        self.assertContains(reponse, "En retard de")
+        self.assertContains(reponse, "ff-badge--rouge")
+
+    def test_la_page_ne_coute_pas_une_requete_par_camion(self):
+        for index in range(6):
+            autre = creer_vehicule(immatriculation=f"EN {6000 + index} RB")
+            creer_document(autre, Document.TypeDocument.ASSURANCE, jours=20)
+
+        adresse = reverse("fleet:entretien_liste")
+        with CaptureQueriesContext(connection) as avec_sept:
+            self.client.get(adresse)
+
+        for index in range(6):
+            autre = creer_vehicule(immatriculation=f"EN {7000 + index} RB")
+            creer_document(autre, Document.TypeDocument.ASSURANCE, jours=20)
+        with CaptureQueriesContext(connection) as avec_treize:
+            self.client.get(adresse)
+
+        self.assertEqual(len(avec_sept), len(avec_treize))

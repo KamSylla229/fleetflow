@@ -1,11 +1,26 @@
 {% extends "base.html" %}
 {% load humanize %}
 
-{% block titre %}Entretiens — FleetFlow{% endblock %}
-{% block titre_page %}Entretiens{% endblock %}
+{% comment %}
+  Entretien, assurances et documents — calqué sur
+  docs/maquette/05-entretien.png.
+
+  La page réunit deux choses de natures différentes, et c'est voulu : en haut
+  les échéances **datées** (pièces et permis), en bas l'historique des
+  interventions, dont l'échéance est **kilométrique**. Les mélanger dans les
+  mêmes colonnes obligerait le lecteur à vérifier l'unité de chaque ligne —
+  « dépassé de 17 jours » et « dépassé de 1 000 km » ne se comparent pas.
+
+  Les trois colonnes viennent de echeances.classer_echeances() : ce gabarit ne
+  trie ni ne compte rien, et les dépassées sont en premier parce que la
+  fonction les livre dans cet ordre.
+{% endcomment %}
+
+{% block titre %}Entretien et échéances — FleetFlow{% endblock %}
+{% block titre_page %}Entretien, assurances et documents{% endblock %}
 {% block sous_titre %}
-  {{ page_obj.paginator.count }} intervention{{ page_obj.paginator.count|pluralize }} ·
-  échéance comparée au compteur actuel du camion
+  {{ total_sous_60 }} échéance{{ total_sous_60|pluralize }} sous 60 jours ·
+  {{ classement.depassees|length }} dépassée{{ classement.depassees|length|pluralize }}
 {% endblock %}
 
 {% block actions %}
@@ -15,6 +30,14 @@
 {% endblock %}
 
 {% block contenu %}
+
+<div class="ff-grille ff-grille--3">
+  {% include "partials/_colonne_echeances.html" with titre="Dépassées" items=classement.depassees variante="rouge" vide="Aucune pièce dépassée." only %}
+  {% include "partials/_colonne_echeances.html" with titre="Sous 30 jours" items=classement.sous_30_j variante="ambre" vide="Rien à renouveler dans le mois." only %}
+  {% include "partials/_colonne_echeances.html" with titre="Sous 60 jours" items=classement.sous_60_j vide="Rien à prévoir dans les deux mois." only %}
+</div>
+
+<h2 class="h5 fw-semibold mt-4 mb-3">Entretiens enregistrés</h2>
 
 <form method="get" class="ff-filtres">
   <div class="ff-filtres__grille">
@@ -104,6 +127,19 @@
         </tr>
       {% endfor %}
     </tbody>
+    <tfoot>
+      <tr>
+        {% comment %}
+          Le total porte sur l'année entière, pas sur la page ni sur les
+          filtres : c'est le chiffre qu'un gérant cherche — ce que la flotte a
+          coûté en entretien cette année. Le dire explicitement dans le
+          libellé évite qu'il soit lu comme la somme des lignes affichées.
+        {% endcomment %}
+        <td colspan="5">Coût des entretiens sur {{ annee }}</td>
+        <td class="ff-droite ff-chiffre">{{ cout_annuel|floatformat:0|intcomma }} F</td>
+        <td></td>
+      </tr>
+    </tfoot>
   </table>
 </div>
 
