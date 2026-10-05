@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% comment %}
+  La carte de la flotte — calquée sur docs/maquette/02-carte.png.
+
+  Trois choses à savoir avant de lire ce gabarit.
+
+  1. **La page est lisible sans Leaflet.** La liste de droite est rendue par
+     Django : plaques, états GPS, vitesses, heures de relevé. Si le fond de
+     carte ne se charge pas — réseau coupé, tuiles indisponibles —, il reste
+     un tableau de bord GPS parfaitement utilisable. C'est voulu : les
+     camions roulent là où la liaison est mauvaise.
+
+  2. **Les tracés d'itinéraires sont rendus une seule fois**, par
+     {{ … |json_script }}, et non renvoyés par l'endpoint de
+     rafraîchissement. Ils ne changent jamais.
+
+  3. **json_script et non un {{ }} dans du JavaScript.** Le filtre produit une
+     balise <script type="application/json"> dont Django échappe le contenu
+     pour ce contexte précis. Écrire `var points = {{ itineraires }};` dans un
+     <script> serait une injection : il suffirait d'un libellé contenant
+     </script> pour sortir de la chaîne.
+{% endcomment %}
+
+{% block titre %}Carte de la flotte — FleetFlow{% endblock %}
+{% block titre_page %}Carte de la flotte{% endblock %}
+{% block sous_titre %}
+  {% comment %}
+    Les compteurs portent un data-carte-compteur : le script les récrit sans
+    recharger la page, comme les cartes du tableau de bord.
+  {% endcomment %}
+  <span data-carte-compteur="en_route">{{ compteurs.en_route }}</span> en route ·
+  <span data-carte-compteur="a_arret">{{ compteurs.a_arret }}</span> à l'arrêt ·
+  <span data-carte-compteur="sans_signal">{{ compteurs.sans_signal }}</span> sans signal ·
+  relevé à <span class="ff-chiffre" data-carte-mesure>{{ mesure_le }}</span>
+{% endblock %}
+
+{% block actions %}
+  <a class="ff-btn ff-btn--secondaire" href="{% url 'fleet:alerte_liste' %}">
+    <i class="bi bi-exclamation-triangle" aria-hidden="true"></i> Alertes
+  </a>
+  <a class="ff-btn ff-btn--principal" href="{% url 'fleet:dashboard' %}">
+    <i class="bi bi-grid-1x2" aria-hidden="true"></i> Tableau de bord
+  </a>
+{% endblock %}
+
+{% block contenu %}
+
+{% comment %}
+  Les positions initiales voyagent avec la page, et non par un premier appel à
+  l'endpoint : les points sont donc là dès l'ouverture, sans dixième de
+  seconde de carte vide, et sans une requête HTTP de plus. C'est le même
+  dictionnaire que celui du JSON — la fonction views._camions_carte est
+  traversée par les deux chemins.
+{% endcomment %}
+{{ camions|json_script:"carte-camions" }}
+{{ itineraires|json_script:"carte-itineraires" }}
+{{ centre|json_script:"carte-centre" }}
+
+<div class="ff-grille ff-grille--7-5"
+     id="carte-flotte"
+     data-positions-url="{% url 'fleet:carte_positions' %}"
+     data-zoom="{{ zoom }}"
+     {% comment %}
+       L'unique ressource de cette page qui vient du réseau. Le fond de carte
+       ne peut pas être local : stocker les tuiles du Bénin représenterait
+       plusieurs gigaoctets. Elle est donc écrite ici, visible, et non cachée
+       au milieu du JavaScript — et la page fonctionne sans elle.
+
+       La politique d'usage des tuiles d'OpenStreetMap interdit un trafic
+       commercial soutenu : héberger ses propres tuiles ou prendre un
+       fournisseur est noté dans BACKLOG.md pour la mise en production.
+     {% endcomment %}
+     data-tuiles-url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+     data-tuiles-attribution="&copy; les contributeurs OpenStreetMap">
+
+  <div class="ff-carte ff-carte--plein">
+    {% comment %}
+      Le conteneur de la carte. Leaflet y écrit tout seul ; le message
+      ci-dessous est ce que voit un visiteur dont le JavaScript ne tourne pas,
+      et il disparaît dès que Leaflet prend la main.
+    {% endcomment %}
+    <div class="ff-plan" id="plan">
+      <p class="ff-plan__attente">
+        Chargement du fond de carte… La liste des camions, à droite, est
+        complète sans lui.
+      </p>
+    </div>
+    <div class="ff-plan__legende">
+      {% comment %}
+        Les quatre états, dans l'ordre de gravité croissante. Les pastilles
+        portent les mêmes classes que les points de la carte : une couleur
+        changée dans la feuille de style l'est aux deux endroits.
+      {% endcomment %}
+      <span class="ff-legende__item">
+        <span class="ff-marqueur__point ff-marqueur__point--vert"></span> En route
+      </span>
+      <span class="ff-legende__item">
+        <span class="ff-marqueur__point ff-marqueur__point--ambre"></span> À l'arrêt
+      </span>
+      <span class="ff-legende__item">
+        <span class="ff-marqueur__point ff-marqueur__point--rouge"></span>
+        Sans signal (plus rien depuis {{ seuil_minutes }} min)
+      </span>
+      <span class="ff-legende__item">
+        <span class="ff-marqueur__point ff-marqueur__point--neutre"></span>
+        Aucune donnée
+      </span>
+    </div>
+  </div>
+
+  <div class="ff-carte">
+    <div class="ff-carte__entete">
+      <h2 class="ff-carte__titre">Camions suivis</h2>
+      <span class="ff-carte__compteur">{{ camions|length }}</span>
+    </div>
+    {% comment %}
+      La liste est reconstruite par le script à chaque passage, d'où le
+      data-camions-liste. Elle est rendue une première fois par Django pour
+      que la page soit juste avant que le script ne tourne.
+    {% endcomment %}
+    <div class="ff-carte__corps" data-camions-liste>
+      {% for camion in camions %}
+        <div class="ff-suivi" data-camion="{{ camion.id }}">
+          <span class="ff-marqueur__point ff-marqueur__point--{{ camion.ton }}"></span>
+          <span class="ff-suivi__corps">
+            <a class="ff-chiffre ff-suivi__plaque" href="{{ camion.url }}">
+              {{ camion.immatriculation }}
+            </a>
+            <span class="ff-sous-ligne">
+              {{ camion.statut_libelle }}{% if camion.signal_coupe %} · boîtier coupé{% endif %}
+              {% if camion.destination %} · vers {{ camion.destination }}{% endif %}
+              {% if camion.chauffeur %} · {{ camion.chauffeur }}{% endif %}
+            </span>
+          </span>
+          <span class="ff-suivi__mesures ff-chiffre">
+            {% if camion.vitesse is not None %}
+              <span class="ff-suivi__vitesse">{{ camion.vitesse }} km/h</span>
+            {% endif %}
+            {% if camion.vu_le %}
+              <span class="ff-sous-ligne">{{ camion.vu_le }}</span>
+            {% endif %}
+          </span>
+        </div>
+      {% empty %}
+        <p class="ff-champ__aide mb-0">
+          Aucun camion actif. Ajoutez un camion, ou lancez
+          <code>python manage.py seed_demo</code>.
+        </p>
+      {% endfor %}
+    </div>
+  </div>
+
+</div>
+
+{% endblock %}
+
+{% block styles %}
+  <link rel="stylesheet" href="{% static 'vendor/leaflet/leaflet.css' %}">
+{% endblock %}
+
+{% block scripts %}
+  {% comment %}
+    Leaflet avant carte.js : le second utilise le `L` global que le premier
+    installe. Les deux sont servis depuis static/vendor et static/js, aucun
+    CDN.
+  {% endcomment %}
+  <script src="{% static 'vendor/leaflet/leaflet.js' %}"></script>
+  <script src="{% static 'js/carte.js' %}"></script>
+{% endblock %}

@@ -785,6 +785,154 @@ button:focus-visible,
   .ff-jauge__valeur  { grid-area: 1 / 2 / 2 / 3; }
 }
 
+/* Deux cartes cote a cote sont etirees a la meme hauteur par la grille. Sans
+   cette regle, la plus courte garde son pied de carte au milieu et laisse un
+   blanc dessous — visible au premier coup d'oeil sur le tableau de bord. Le
+   modificateur est explicite plutot qu'applique a toutes les `.ff-carte` : la
+   plupart des pages n'ont qu'une carte par rangee, et rien a etirer. */
+.ff-carte--etiree { display: flex; flex-direction: column; }
+.ff-carte--etiree > .ff-carte__corps { flex: 1 1 auto; }
+
+/* --- 18 quater. Carte de la flotte -------------------------------------- */
+/* Attention au vocabulaire : dans ce theme, `.ff-carte` est une *carte* au
+   sens d'un bloc de contenu — il y en a sur toutes les pages. Le fond de
+   carte geographique s'appelle donc `.ff-plan`, pour qu'aucune relecture ne
+   confonde les deux. */
+
+.ff-grille--7-5 { grid-template-columns: 7fr 5fr; }
+
+/* La carte qui contient le plan n'a pas de rembourrage : le fond de carte
+   touche ses bords, comme sur la maquette. */
+.ff-carte--plein { padding: 0; overflow: hidden; }
+
+.ff-plan {
+  height: clamp(340px, 62vh, 640px);
+  /* Un fond neutre sous les tuiles : si elles ne se chargent pas, on voit un
+     aplat propre avec les traces et les points dessus, et non un rectangle
+     blanc qui ressemble a une page cassee. */
+  background: var(--ff-neutre-fond);
+}
+
+.ff-plan__attente {
+  padding: 24px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--ff-encre-3);
+}
+
+.ff-plan__legende {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--ff-bordure);
+  background: var(--ff-surface-basse);
+  font-size: 12px;
+  color: var(--ff-encre-2);
+}
+
+.ff-legende__item { display: inline-flex; align-items: center; gap: 6px; }
+
+/* --- Le point qui represente un camion ---------------------------------- */
+/* La meme pastille sert trois fois : sur le plan (dans un divIcon Leaflet),
+   dans la legende, et devant chaque ligne de la liste de suivi. Une couleur
+   corrigee l'est donc aux trois endroits. */
+
+.ff-marqueur__point {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  background: var(--ff-encre-3);
+  /* L'anneau blanc detache le point des tuiles, quelle que soit la couleur
+     de la route en dessous. */
+  box-shadow: 0 0 0 2px #FFFFFF, 0 1px 3px rgba(15, 26, 20, 0.35);
+  flex: 0 0 auto;
+}
+
+.ff-marqueur__point--vert   { background: var(--ff-vert); }
+.ff-marqueur__point--ambre  { background: #C8881F; }
+.ff-marqueur__point--rouge  { background: var(--ff-rouge-texte); }
+.ff-marqueur__point--neutre { background: var(--ff-encre-3); }
+
+/* Leaflet donne a tout divIcon un fond blanc et une bordure grise. Deux
+   classes dans le selecteur : la regle gagne quel que soit l'ordre dans
+   lequel leaflet.css et fleetflow.css sont charges. C'est aussi la raison
+   pour laquelle on n'utilise PAS les icones par defaut de Leaflet, qui
+   reclameraient marker-icon.png et marker-shadow.png par des chemins que
+   Django ne sert pas la ou Leaflet les cherche. */
+.ff-marqueur.leaflet-div-icon {
+  background: transparent;
+  border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* L'etiquette de plaque posee a cote du point. */
+.ff-plan .leaflet-tooltip.ff-etiquette-plan {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--ff-bordure);
+  border-radius: 6px;
+  box-shadow: none;
+  padding: 1px 6px;
+  font-family: var(--ff-chiffre);
+  font-size: 11px;
+  color: var(--ff-encre);
+  white-space: nowrap;
+}
+/* La fleche de l'etiquette est laissee en place : l'etiquette apparait au
+   survol, au-dessus du point, et c'est elle qui dit lequel. */
+
+.ff-plan .leaflet-popup-content-wrapper {
+  border-radius: var(--ff-rayon-carte);
+}
+.ff-plan .leaflet-popup-content {
+  margin: 12px 14px;
+  font-family: var(--ff-texte);
+  font-size: 13px;
+  color: var(--ff-encre);
+}
+
+.ff-popup__plaque {
+  display: block;
+  font-family: var(--ff-chiffre);
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+.ff-popup__ligne { display: block; color: var(--ff-encre-2); }
+
+/* --- La liste de suivi, a droite du plan -------------------------------- */
+
+.ff-suivi {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--ff-bordure-douce);
+  cursor: pointer;
+}
+.ff-suivi:first-child { padding-top: 0; }
+.ff-suivi:last-child { border-bottom: 0; padding-bottom: 0; }
+
+.ff-suivi__corps { flex: 1 1 auto; min-width: 0; }
+.ff-suivi__plaque { font-size: 13px; color: var(--ff-encre); }
+.ff-suivi__plaque:hover { color: var(--ff-vert-texte); }
+
+.ff-suivi__mesures { text-align: right; white-space: nowrap; }
+.ff-suivi__vitesse { font-size: 13px; }
+
+/* La ligne du camion dont la bulle est ouverte sur le plan. */
+.ff-suivi--actif { background: var(--ff-vert-fond); }
+
+@media (max-width: 991px) {
+  /* Le plan et la liste l'un sous l'autre : a cette largeur, 5fr ne suffit
+     plus a lire une plaque et une vitesse sur la meme ligne. */
+  .ff-grille--7-5 { grid-template-columns: 1fr; }
+  .ff-plan { height: clamp(280px, 48vh, 420px); }
+}
+
 /* --- 19. Barre mobile --------------------------------------------------- */
 
 .ff-barre-mobile {

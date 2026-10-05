@@ -224,3 +224,26 @@ réponse est non, et c'est la vraie difficulté de ce point.
 Le point « Deux entrées de menu passent sur deux lignes » ci-dessus est résolu
 pour moitié : la pastille « bientôt » a disparu de cette entrée en phase D,
 comme prévu. Reste « Fournisseurs GPS ».
+
+### Les tuiles de la carte viennent d'OpenStreetMap
+C'est la seule ressource distante du projet, et c'est assumé : stocker les
+tuiles du Bénin représenterait plusieurs gigaoctets. Mais la politique d'usage
+du serveur de tuiles d'OpenStreetMap interdit un trafic commercial soutenu —
+elle vise les démonstrations et les petits projets, pas une application vendue
+à des transporteurs. Avant toute mise en production : héberger ses propres
+tuiles, ou prendre un fournisseur. L'adresse est écrite dans un attribut
+`data-tuiles-url` du gabarit `carte.html`, un seul endroit à changer.
+
+### Regrouper les points quand la flotte grandit
+Au cadrage par défaut, les camions au départ de Cotonou se superposent. Les
+étiquettes de plaque ont dû passer du permanent au survol pour cette raison —
+Leaflet ne gère aucune collision d'étiquettes. Avec trente camions, ce seront
+les points eux-mêmes qui deviendront illisibles. La réponse habituelle est un
+greffon de regroupement (`Leaflet.markercluster`), soit une dépendance de plus :
+à décider quand une flotte réelle le justifiera, pas avant.
+
+### Rejouer le trajet de la journée
+La carte montre la dernière position connue. Voir le chemin parcouru depuis ce
+matin demanderait de renvoyer l'historique des relevés et de le dessiner, avec
+un curseur de temps. Volontairement hors cadre de la phase D : l'écran doit
+d'abord répondre à « où sont mes camions maintenant ».

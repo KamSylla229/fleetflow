@@ -24,6 +24,9 @@ urlpatterns = [
     # authentification, l'endpoint qui porte les memes chiffres doit l'exiger
     # aussi, et les lire cote a cote est la facon la plus simple de le voir.
     path("dashboard/kpi/", views.dashboard_kpi, name="dashboard_kpi"),
+    # --- Carte ---
+    path("carte/", views.CarteView.as_view(), name="carte"),
+    path("carte/positions/", views.carte_positions, name="carte_positions"),
     # --- Véhicules ---
     path("vehicules/", views.VehiculeListView.as_view(), name="vehicule_liste"),
     path(

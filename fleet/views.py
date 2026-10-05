@@ -12,6 +12,7 @@ oublier — un oubli n'échoue pas, il ouvre discrètement une page.
 
 from datetime import timedelta
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -37,6 +38,7 @@ from django.views.generic import (
 
 from . import services
 from .echeances import classer_echeances, collecter_echeances
+from .itineraires import CENTRE_FLOTTE, ZOOM_FLOTTE, itineraire_par_code
 from .kpi import calculer_kpi
 from .forms import (
     ChauffeurForm,
@@ -1035,6 +1037,178 @@ def dashboard_kpi(request):
             # L'heure du serveur, affichée sous le titre : elle dit à
             # l'utilisateur que les chiffres sont frais, ce qu'aucun compteur
             # ne sait faire tout seul.
+            "mesure_le": timezone.localtime().strftime("%H:%M:%S"),
+        }
+    )
+
+
+# --- Carte -------------------------------------------------------------------
+
+
+def _camions_carte(maintenant=None):
+    """La flotte active prête à être placée sur la carte, en deux requêtes.
+
+    Même parti pris que le tableau de bord : une seule fonction traversée par
+    le rendu initial de la page et par l'endpoint JSON, pour que les deux
+    écrivent exactement les mêmes chaînes. Les nombres sont formatés ici, pas
+    dans le navigateur.
+
+    Les camions sans aucun relevé sont renvoyés **avec** les autres, latitude
+    et longitude à None. Ils ne peuvent pas être placés sur le fond de carte,
+    mais ils doivent apparaître dans la liste latérale : un camion dont le
+    boîtier n'a jamais parlé est précisément celui qu'on cherche, et le faire
+    disparaître de l'écran serait le pire des affichages.
+
+    Coût : deux requêtes, quelle que soit la taille de la flotte — la flotte
+    annotée de son dernier relevé, et les missions en cours.
+    """
+    maintenant = maintenant or timezone.now()
+
+    vehicules = list(
+        services.annoter_dernieres_positions(
+            Vehicule.objects.filter(actif=True).select_related("fournisseur_gps")
+        )
+    )
+    missions = services.missions_en_cours_par_vehicule(vehicules)
+
+    camions = []
+    for vehicule in vehicules:
+        statut = services.statut_gps(vehicule, maintenant=maintenant)
+        mission = missions.get(vehicule.pk)
+        horodatage = vehicule.gps_horodatage
+        vitesse = vehicule.gps_vitesse_kmh
+
+        camions.append(
+            {
+                "id": vehicule.pk,
+                "immatriculation": vehicule.immatriculation,
+                "url": vehicule.get_absolute_url(),
+                # float() et non Decimal : JsonResponse ne sait pas sérialiser
+                # un Decimal, et une coordonnée n'a pas besoin de la précision
+                # exacte du décimal — contrairement à de l'argent.
+                "lat": float(vehicule.gps_latitude)
+                if vehicule.gps_latitude is not None
+                else None,
+                "lon": float(vehicule.gps_longitude)
+                if vehicule.gps_longitude is not None
+                else None,
+                "statut": statut.code,
+                "statut_libelle": statut.libelle,
+                # Le même ton que partout ailleurs dans le thème : la couleur
+                # du point sur la carte est celle du badge de la liste des
+                # camions. Un vert qui voudrait dire deux choses différentes
+                # selon la page serait pire que pas de couleur du tout.
+                "ton": statut.ton,
+                "vitesse": round(vitesse) if vitesse is not None else None,
+                # Une heure absolue, et non « il y a 4 minutes » : la liste est
+                # reconstruite toutes les dix secondes, et une durée relative
+                # obligerait à écrire son formatage une seconde fois en
+                # JavaScript.
+                "vu_le": timezone.localtime(horodatage).strftime("%H:%M")
+                if horodatage is not None
+                else None,
+                # Un signal coupé est une décision — l'interrupteur de
+                # démonstration —, pas une panne. Les distinguer à l'écran
+                # évite de chercher une panne qu'on a provoquée soi-même.
+                "signal_coupe": vehicule.signal_coupe,
+                "itineraire": vehicule.itineraire,
+                "chauffeur": mission.chauffeur.nom if mission else None,
+                "destination": mission.destination if mission else None,
+                "progression": vehicule.progression_pourcent,
+            }
+        )
+
+    return camions
+
+
+def _compteurs_carte(camions):
+    """Combien de camions dans chacun des quatre états GPS.
+
+    Sert la ligne sous le titre. Compté ici et non dans le gabarit : quatre
+    {% if %} dans une boucle donneraient quatre compteurs à maintenir.
+    """
+    compteurs = {code: 0 for code in services.LIBELLES_STATUT_GPS}
+    for camion in camions:
+        compteurs[camion["statut"]] += 1
+    return compteurs
+
+
+def _itineraires_carte(camions):
+    """Les polylignes des axes effectivement parcourus par la flotte.
+
+    **Zéro requête.** Les codes d'itinéraire viennent de la liste de camions
+    déjà chargée, et `itineraire_par_code` lit le dictionnaire de
+    fleet/itineraires.py, pas la base. C'est la leçon de la septième requête
+    du tableau de bord, appliquée d'avance : ne jamais recharger ce qu'on a
+    déjà en main.
+
+    Ces tracés ne changent jamais : ils sont rendus **une fois** avec la page,
+    et l'endpoint de rafraîchissement ne les renvoie pas. Les réexpédier
+    toutes les dix secondes serait payer une donnée figée au prix d'une donnée
+    vivante.
+
+    Seuls les axes d'au moins un camion actif sont envoyés : afficher les
+    trois alors que la flotte n'en suit qu'un encombrerait la carte sans rien
+    apprendre.
+    """
+    codes = {camion["itineraire"] for camion in camions if camion["itineraire"]}
+    traces = []
+    for code in sorted(codes):
+        itineraire = itineraire_par_code(code)
+        if itineraire is None:
+            continue
+        traces.append(
+            {
+                "code": itineraire.code,
+                "libelle": itineraire.libelle,
+                "points": [[latitude, longitude] for latitude, longitude in itineraire.points],
+            }
+        )
+    return traces
+
+
+class CarteView(LoginRequiredMixin, TemplateView):
+    """La carte de la flotte : un point par camion, coloré par son état GPS.
+
+    La page est lisible sans qu'une ligne de JavaScript ne tourne : la liste
+    latérale est rendue par Django, avec les positions, les vitesses et les
+    heures de relevé. Leaflet n'ajoute que le fond de carte — et il est servi
+    depuis static/vendor, comme Bootstrap.
+    """
+
+    template_name = "fleet/carte.html"
+
+    def get_context_data(self, **kwargs):
+        contexte = super().get_context_data(**kwargs)
+        camions = _camions_carte()
+        contexte["camions"] = camions
+        contexte["compteurs"] = _compteurs_carte(camions)
+        contexte["itineraires"] = _itineraires_carte(camions)
+        contexte["centre"] = list(CENTRE_FLOTTE)
+        contexte["zoom"] = ZOOM_FLOTTE
+        contexte["mesure_le"] = timezone.localtime().strftime("%H:%M:%S")
+        contexte["seuil_minutes"] = settings.FLEETFLOW_SEUIL_SANS_SIGNAL_MIN
+        return contexte
+
+
+@login_required
+def carte_positions(request):
+    """Les positions de la flotte en JSON, réinterrogées toutes les dix secondes.
+
+    Ne renvoie **pas** les tracés d'itinéraires, ni le centre, ni le zoom :
+    tout cela est figé et déjà dans la page. Le rafraîchissement ne transporte
+    que ce qui bouge.
+
+    Et surtout, il ne transporte aucune instruction de cadrage. Le script
+    recadre la carte une seule fois, au premier affichage : si l'endpoint
+    imposait un centre à chaque passage, la carte sauterait toutes les dix
+    secondes sous le doigt de l'utilisateur en train de la déplacer.
+    """
+    camions = _camions_carte()
+    return JsonResponse(
+        {
+            "camions": camions,
+            "compteurs": _compteurs_carte(camions),
             "mesure_le": timezone.localtime().strftime("%H:%M:%S"),
         }
     )

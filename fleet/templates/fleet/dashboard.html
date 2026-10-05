@@ -68,7 +68,7 @@
       `item.depassee`, une propriété de EcheanceClassee : le gabarit lit un
       booléen, il ne compare aucune date.
     {% endcomment %}
-    <div class="ff-carte">
+    <div class="ff-carte ff-carte--etiree">
       <div class="ff-carte__entete{% if donnees.depassees %} ff-carte__entete--rouge{% endif %}">
         <h2 class="ff-carte__titre">À renouveler</h2>
         <span class="ff-carte__compteur">{{ donnees.echeances_60j }}</span>
@@ -112,7 +112,7 @@
       avancer seconde par seconde sans que ce gabarit ait quoi que ce soit à
       demander.
     {% endcomment %}
-    <div class="ff-carte">
+    <div class="ff-carte ff-carte--etiree">
       <div class="ff-carte__entete{% if donnees.alertes %} ff-carte__entete--ambre{% endif %}">
         <h2 class="ff-carte__titre">Alertes ouvertes</h2>
         <span class="ff-carte__compteur">{{ donnees.alertes|length }}</span>

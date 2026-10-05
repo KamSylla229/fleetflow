@@ -15,6 +15,7 @@ page du site. Celui-ci n'en fait aucune.
 # l'onglet, au lieu d'énumérer les trente routes du projet.
 PREFIXES_NAVIGATION = (
     ("dashboard", "dashboard"),
+    ("carte", "carte"),
     ("vehicule", "camions"),
     ("chauffeur", "chauffeurs"),
     ("mission", "missions"),

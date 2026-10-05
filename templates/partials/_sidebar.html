@@ -29,11 +29,12 @@
     <span class="ff-nav__libelle">Tableau de bord</span>
   </a>
 
-  <span class="ff-nav__item ff-nav__item--bientot">
+  <a class="ff-nav__item{% if nav_actif == 'carte' %} ff-nav__item--actif{% endif %}"
+     href="{% url 'fleet:carte' %}"
+     {% if nav_actif == 'carte' %}aria-current="page"{% endif %}>
     <i class="bi bi-map" aria-hidden="true"></i>
     <span class="ff-nav__libelle">Carte</span>
-    <span class="ff-nav__bientot">bientôt</span>
-  </span>
+  </a>
 
   <a class="ff-nav__item{% if nav_actif == 'camions' %} ff-nav__item--actif{% endif %}"
      href="{% url 'fleet:vehicule_liste' %}"

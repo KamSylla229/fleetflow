@@ -32,6 +32,8 @@ class OssatureDesPagesTest(TestCase):
     def pages(self):
         """(adresse, onglet attendu) pour toutes les pages de l'application."""
         return [
+            (reverse("fleet:dashboard"), "dashboard"),
+            (reverse("fleet:carte"), "carte"),
             (reverse("fleet:vehicule_liste"), "camions"),
             (reverse("fleet:vehicule_creer"), "camions"),
             (reverse("fleet:vehicule_detail", args=[self.vehicule.pk]), "camions"),
@@ -71,11 +73,12 @@ class OssatureDesPagesTest(TestCase):
         Ce sont des <span> et non des liens : une entrée désactivée reste
         atteignable au clavier et promet une destination qui n'existe pas.
 
-        « Tableau de bord » a quitté cette liste en phase D : la page existe,
-        l'entrée est devenue un vrai lien. Voir le test suivant.
+        « Tableau de bord » et « Carte » ont quitté cette liste en phase D :
+        les deux pages existent, les deux entrées sont devenues de vrais
+        liens. Voir le test suivant, et test_carte.py pour la seconde.
         """
         reponse = self.client.get(reverse("fleet:vehicule_liste"))
-        for libelle in ["Carte", "Rapports", "Fournisseurs GPS"]:
+        for libelle in ["Rapports", "Fournisseurs GPS"]:
             with self.subTest(libelle=libelle):
                 self.assertContains(reponse, libelle)
         self.assertContains(reponse, "ff-nav__item--bientot")
@@ -141,6 +144,7 @@ class RessourcesLocalesTest(TestCase):
         "vendor/icones/fonts/bootstrap-icons.woff2",
         "js/compteur-alerte.js",
         "js/dashboard.js",
+        "js/carte.js",
         # Leaflet, servi depuis static/vendor comme Bootstrap et les polices.
         "vendor/leaflet/leaflet.js",
         "vendor/leaflet/leaflet.css",
@@ -162,6 +166,7 @@ class RessourcesLocalesTest(TestCase):
     def test_aucune_page_ne_pointe_vers_un_cdn(self):
         adresses = [
             reverse("fleet:dashboard"),
+            reverse("fleet:carte"),
             reverse("fleet:vehicule_liste"),
             reverse("fleet:chauffeur_liste"),
             reverse("fleet:mission_liste"),
@@ -476,6 +481,7 @@ class SyntaxeDesGabaritsTest(TestCase):
     def adresses(self):
         return [
             reverse("fleet:dashboard"),
+            reverse("fleet:carte"),
             reverse("fleet:vehicule_liste"),
             reverse("fleet:vehicule_detail", args=[self.vehicule.pk]),
             reverse("fleet:vehicule_creer"),

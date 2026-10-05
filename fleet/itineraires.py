@@ -18,6 +18,17 @@ from dataclasses import dataclass
 # sphère : l'erreur est de l'ordre de 0,5 %, sans importance ici.
 RAYON_TERRE_KM = 6371.0
 
+# Cadrage par défaut de la carte : le centre du Bénin, et un zoom qui tient le
+# pays entier dans la fenêtre. C'est ce qu'on affiche quand aucun camion n'a
+# encore de position — sans ces deux valeurs, Leaflet ouvrirait sur l'océan au
+# large du golfe de Guinée, à la latitude et longitude zéro.
+#
+# Ces constantes vivent ici et non dans le JavaScript parce qu'elles sont de
+# la géographie, comme le reste de ce module, et que ce fichier est le seul
+# endroit du projet où l'on décrit le Bénin.
+CENTRE_FLOTTE = (9.3, 2.3)
+ZOOM_FLOTTE = 7
+
 
 def distance_km(depart, arrivee):
     """Distance à vol d'oiseau entre deux points (latitude, longitude).
