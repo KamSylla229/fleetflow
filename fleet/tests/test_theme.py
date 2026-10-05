@@ -141,6 +141,15 @@ class RessourcesLocalesTest(TestCase):
         "vendor/icones/fonts/bootstrap-icons.woff2",
         "js/compteur-alerte.js",
         "js/dashboard.js",
+        # Leaflet, servi depuis static/vendor comme Bootstrap et les polices.
+        "vendor/leaflet/leaflet.js",
+        "vendor/leaflet/leaflet.css",
+        # leaflet.css référence ces deux images par une url() relative. Sans
+        # elles, la page fonctionne mais le navigateur réclame deux fichiers
+        # absents — et c'est exactement le piège annoncé : les 404 d'icônes
+        # Leaflet sous Django.
+        "vendor/leaflet/images/layers.png",
+        "vendor/leaflet/images/marker-icon.png",
     )
 
     def setUp(self):
