@@ -225,26 +225,12 @@ Le point « Deux entrées de menu passent sur deux lignes » ci-dessus est réso
 pour moitié : la pastille « bientôt » a disparu de cette entrée en phase D,
 comme prévu. Reste « Fournisseurs GPS ».
 
-### Choisir un fournisseur de tuiles
-Le fond de carte est désactivé par défaut depuis que les serveurs
-d'OpenStreetMap ont renvoyé « Access blocked » en développement : leur
-politique d'usage interdit qu'une application en dépende, et elle est
-appliquée sans prévenir. Vérifié en A/B dans un navigateur sans interface — ce
-n'est pas le `Referrer-Policy` de Django, les tuiles se chargent avec et sans
-cet en-tête ; c'est bien un blocage côté OSM.
-
-Sans fond, la carte reste utilisable : itinéraires et camions sur un aplat
-neutre. Pour un vrai déploiement il faudra un fournisseur avec un contrat et
-une clé (MapTiler, Stadia, Thunderforest…), ou ses propres tuiles. Une seule
-variable à renseigner, `FLEETFLOW_TUILES_URL`, plus son attribution.
-
-### Regrouper les points quand la flotte grandit
-Au cadrage par défaut, les camions au départ de Cotonou se superposent. Les
-étiquettes de plaque ont dû passer du permanent au survol pour cette raison —
-Leaflet ne gère aucune collision d'étiquettes. Avec trente camions, ce seront
-les points eux-mêmes qui deviendront illisibles. La réponse habituelle est un
-greffon de regroupement (`Leaflet.markercluster`), soit une dépendance de plus :
-à décider quand une flotte réelle le justifiera, pas avant.
+### Les plaques se chevauchent quand les camions sont au même endroit
+Huit camions au départ de Cotonou donnent huit plaques empilées sur le dessin.
+Ce n'est plus le défaut d'une bibliothèque — il n'y en a plus — mais celui de
+l'affichage d'étiquettes en général : il faudrait les décaler les unes par
+rapport aux autres, ou n'afficher que celle du camion choisi. À décider devant
+une flotte réelle, et à l'œil, pas en principe.
 
 ### Rejouer le trajet de la journée
 La carte montre la dernière position connue. Voir le chemin parcouru depuis ce

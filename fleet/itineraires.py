@@ -18,13 +18,6 @@ from dataclasses import dataclass
 # sphère : l'erreur est de l'ordre de 0,5 %, sans importance ici.
 RAYON_TERRE_KM = 6371.0
 
-# Cadrage Leaflet. Ces deux constantes disparaissent avec Leaflet, au commit de
-# nettoyage : elles n'ont plus de sens une fois la carte dessinée en SVG dans
-# un repère fixe. Gardées ici pour que ce commit laisse la suite verte.
-CENTRE_FLOTTE = (9.3, 2.3)
-ZOOM_FLOTTE = 7
-
-
 # Dimensions du dessin de la page Carte. Ce sont les seules coordonnées de
 # sortie du module : le gabarit pose un viewBox de cette taille, et le
 # navigateur l'étire à la place disponible. Travailler dans un repère fixe

@@ -5,13 +5,14 @@ Cinq choses y sont éprouvées, dans cet ordre d'importance :
 1. **l'endpoint est fermé** aux visiteurs anonymes. Les positions d'une flotte
    sont la donnée la plus sensible du projet : elles disent où se trouve la
    marchandise ;
-2. **la page vit sans la carte**. La liste latérale est rendue par Django,
-   avec plaques, états, vitesses et heures. Si Leaflet ne charge pas, l'écran
-   reste utilisable — et c'est ce qui compte pour des camions qui roulent là
-   où la liaison est mauvaise ;
-3. **les icônes par défaut de Leaflet ne sont pas utilisées**, le piège
-   annoncé : elles réclament marker-icon.png et marker-shadow.png par des
-   chemins que Django ne sert pas là où Leaflet les cherche ;
+2. **la page vit sans le dessin**. La liste latérale est rendue par Django,
+   avec plaques, états, vitesses et heures. Si le script ne tourne pas,
+   l'écran reste utilisable — et c'est ce qui compte pour des camions qui
+   roulent là où la liaison est mauvaise ;
+3. **le script ne contient ni géographie, ni couleur, ni donnée en dur**. La
+   projection vit dans fleet/itineraires.py, les teintes dans fleetflow.css,
+   les villes et les axes dans les balises json_script. Trois tests lisent la
+   source pour s'en assurer, parce que rien d'autre ne le verrait ;
 4. le budget de requêtes de tout l'endpoint, à 5 puis à 26 camions ;
 5. les tracés d'itinéraires ne coûtent aucune requête, et ne sont pas
    réexpédiés par le rafraîchissement.
@@ -233,7 +234,7 @@ class PositionsTest(TestCase):
 
 
 class LaPageVitSansLaCarteTest(TestCase):
-    """La liste latérale est rendue par Django, pas par Leaflet."""
+    """La liste latérale est rendue par Django, pas par le script."""
 
     @classmethod
     def setUpTestData(cls):
@@ -341,7 +342,7 @@ class LaPageVitSansLaCarteTest(TestCase):
 
 
 class RessourcesDeLaCarteTest(TestCase):
-    """Leaflet en local, et les icônes par défaut laissées de côté."""
+    """Aucune bibliothèque, aucune couleur et aucune géographie dans le script."""
 
     def setUp(self):
         self.utilisateur = get_user_model().objects.create_user(

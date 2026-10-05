@@ -21,18 +21,6 @@
 <head>
   <title>{% block titre %}FleetFlow{% endblock %}</title>
   {% include "partials/_tete.html" %}
-  {% comment %}
-    Les feuilles de style d'une seule page. Vide partout sauf sur la Carte,
-    qui charge Leaflet : quinze kilo-octets inutiles sur chacune des autres
-    pages, ce n'est pas une catastrophe, mais ce n'est pas une raison.
-
-    Le bloc est après _tete.html, donc après fleetflow.css. Les rares règles
-    du thème qui doivent battre celles de Leaflet sont donc écrites avec un
-    sélecteur plus précis (`.ff-plan .leaflet-…`), et ne dépendent pas de
-    l'ordre des fichiers — qu'un futur refactor pourrait changer sans y
-    penser.
-  {% endcomment %}
-  {% block styles %}{% endblock %}
 </head>
 <body>
 
