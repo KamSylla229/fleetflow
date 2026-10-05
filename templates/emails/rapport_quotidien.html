@@ -1,0 +1,135 @@
+{% load humanize %}{% comment %}
+  Version HTML du rapport quotidien.
+
+  Les styles sont **en ligne** et les couleurs écrites en dur : un client de
+  messagerie ne charge ni feuille externe, ni variable CSS, et beaucoup
+  suppriment même la balise <style>. C'est la seule partie du projet où
+  dupliquer les valeurs des jetons est le bon choix — et elle est marquée
+  comme telle pour que personne ne tente de l'« aligner sur le thème ».
+
+  Les deux versions, texte et HTML, lisent le même dictionnaire produit par
+  services.donnees_rapport_quotidien() : aucune des deux ne calcule de total,
+  elles ne peuvent donc pas se contredire.
+{% endcomment %}<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="utf-8"><title>FleetFlow — rapport du {{ jour|date:"d/m/Y" }}</title></head>
+<body style="margin:0;padding:24px;background:#F1F3EE;font-family:Segoe UI,Helvetica,Arial,sans-serif;color:#0F1A14;">
+<div style="max-width:680px;margin:0 auto;background:#FFFFFF;border:1px solid #E4E8E1;border-radius:12px;padding:24px;">
+
+  <p style="margin:0 0 4px;font-size:11px;letter-spacing:0.09em;text-transform:uppercase;color:#5C6660;">
+    FleetFlow — Démo Transport
+  </p>
+  <h1 style="margin:0 0 20px;font-size:22px;">Rapport du {{ jour|date:"d/m/Y" }}</h1>
+
+  <h2 style="font-size:15px;margin:0 0 8px;">Kilométrage de la journée</h2>
+  {% if kilometres %}
+    <table style="width:100%;border-collapse:collapse;font-size:14px;">
+      {% for vehicule, km in kilometres %}
+        <tr>
+          <td style="padding:7px 0;border-bottom:1px solid #EDF0EA;font-family:Consolas,monospace;">
+            {{ vehicule.immatriculation }}
+          </td>
+          <td style="padding:7px 0;border-bottom:1px solid #EDF0EA;text-align:right;font-family:Consolas,monospace;">
+            {{ km }} km
+          </td>
+        </tr>
+      {% endfor %}
+      <tr>
+        <td style="padding:7px 0;font-weight:700;">Total</td>
+        <td style="padding:7px 0;text-align:right;font-weight:700;font-family:Consolas,monospace;">
+          {{ total_km }} km
+        </td>
+      </tr>
+    </table>
+    <p style="font-size:12px;color:#909993;margin:8px 0 0;">
+      Distances mesurées entre relevés GPS : elles sous-estiment légèrement le
+      compteur, chaque segment coupant la courbe de la route.
+    </p>
+  {% else %}
+    <p style="font-size:14px;color:#5C6660;margin:0;">Aucun relevé GPS pour cette journée.</p>
+  {% endif %}
+
+  <h2 style="font-size:15px;margin:24px 0 8px;">Carburant</h2>
+  {% if pleins %}
+    <table style="width:100%;border-collapse:collapse;font-size:14px;">
+      {% for plein in pleins %}
+        <tr>
+          <td style="padding:7px 0;border-bottom:1px solid #EDF0EA;font-family:Consolas,monospace;">
+            {{ plein.vehicule.immatriculation }}
+          </td>
+          <td style="padding:7px 0;border-bottom:1px solid #EDF0EA;text-align:right;font-family:Consolas,monospace;">
+            {{ plein.litres }} L
+          </td>
+          <td style="padding:7px 0;border-bottom:1px solid #EDF0EA;text-align:right;font-family:Consolas,monospace;">
+            {{ plein.cout_total|floatformat:0|intcomma }} F
+          </td>
+          <td style="padding:7px 0;border-bottom:1px solid #EDF0EA;text-align:right;font-family:Consolas,monospace;color:#5C6660;">
+            {% if plein.consommation %}{{ plein.consommation }} L/100{% else %}1<sup>er</sup> plein{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      <tr>
+        <td style="padding:7px 0;font-weight:700;">Total</td>
+        <td style="padding:7px 0;text-align:right;font-weight:700;font-family:Consolas,monospace;">
+          {{ total_litres|floatformat:2 }} L
+        </td>
+        <td style="padding:7px 0;text-align:right;font-weight:700;font-family:Consolas,monospace;">
+          {{ total_cout|floatformat:0|intcomma }} F
+        </td>
+        <td></td>
+      </tr>
+    </table>
+  {% else %}
+    <p style="font-size:14px;color:#5C6660;margin:0;">Aucun plein enregistré pour cette journée.</p>
+  {% endif %}
+
+  <h2 style="font-size:15px;margin:24px 0 8px;">Alertes ouvertes ({{ alertes|length }})</h2>
+  {% if alertes %}
+    {% for alerte in alertes %}
+      <div style="background:#FBEDEC;border:1px solid #F0D2CF;border-radius:8px;padding:10px 12px;margin-bottom:8px;">
+        <p style="margin:0;font-size:14px;color:#B3322C;">{{ alerte.message }}</p>
+        <p style="margin:4px 0 0;font-size:12px;color:#5C6660;">
+          {{ alerte.get_type_alerte_display }} — ouverte depuis le
+          {{ alerte.ouverte_le|date:"d/m/Y à H:i" }}
+        </p>
+      </div>
+    {% endfor %}
+  {% else %}
+    <p style="font-size:14px;color:#5C6660;margin:0;">Aucune alerte ouverte.</p>
+  {% endif %}
+
+  <h2 style="font-size:15px;margin:24px 0 8px;">Échéances</h2>
+  {% comment %}
+    Trois blocs, trois couleurs, comme la page Entretien : le rouge pour ce
+    qui est dépassé, l'ambre pour ce qui approche, le neutre pour le reste.
+  {% endcomment %}
+  {% for bloc in blocs_echeances %}
+    <p style="margin:12px 0 6px;font-size:13px;font-weight:700;color:{{ bloc.couleur }};">
+      {{ bloc.titre }} ({{ bloc.items|length }})
+    </p>
+    {% if bloc.items %}
+      <table style="width:100%;border-collapse:collapse;font-size:14px;">
+        {% for item in bloc.items %}
+          <tr>
+            <td style="padding:6px 0;border-bottom:1px solid #EDF0EA;">
+              {{ item.libelle }}
+              <span style="color:#909993;font-size:12px;">— {{ item.detail }}</span>
+            </td>
+            <td style="padding:6px 0;border-bottom:1px solid #EDF0EA;text-align:right;font-family:Consolas,monospace;color:{{ bloc.couleur }};">
+              {{ item.jours }} j
+            </td>
+          </tr>
+        {% endfor %}
+      </table>
+    {% else %}
+      <p style="font-size:14px;color:#909993;margin:0;">aucune</p>
+    {% endif %}
+  {% endfor %}
+
+  <p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #E4E8E1;font-size:12px;color:#909993;">
+    FleetFlow, gestion de flotte. Message automatique, ne pas répondre.
+  </p>
+
+</div>
+</body>
+</html>

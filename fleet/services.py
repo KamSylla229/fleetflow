@@ -50,6 +50,7 @@ from django.db.models import OuterRef, Subquery
 from django.utils import timezone
 
 from .echeances import classer_echeances, collecter_echeances
+from .itineraires import distance_km
 from .models import (
     Alerte,
     Chauffeur,
@@ -1640,3 +1641,86 @@ def cout_entretiens_annee(annee=None):
         total=models.Sum("cout")
     )["total"]
     return total or Decimal("0")
+
+
+# --- Rapport quotidien -------------------------------------------------------
+
+
+def kilometres_parcourus(jour=None):
+    """Kilomètres parcourus par camion un jour donné, d'après ses positions.
+
+    On additionne les distances entre relevés successifs du même camion. Avec
+    un point toutes les cinq minutes, chaque segment est une corde qui coupe
+    la courbe de la route : le total **sous-estime** donc légèrement le
+    compteur réel. C'est assumé — la mesure sert à comparer les camions entre
+    eux et à repérer une journée anormale, pas à facturer au kilomètre. Le
+    chiffre qui fait foi reste `Vehicule.kilometrage`, alimenté par les
+    clôtures de mission et les pleins.
+
+    Renvoie une liste de couples (camion, kilomètres), du plus roulant au
+    moins roulant — l'ordre dans lequel un gérant veut les lire.
+
+    Coût : une requête, quel que soit le nombre de camions.
+    """
+    jour = jour or timezone.localdate()
+
+    # horodatage__date respecte le fuseau du projet (Africa/Porto-Novo) parce
+    # que USE_TZ est actif : un relevé de 23 h 30 locale appartient bien au
+    # jour local, pas au jour UTC suivant.
+    positions = (
+        PositionGPS.objects.filter(horodatage__date=jour)
+        .order_by("vehicule_id", "horodatage", "pk")
+        .select_related("vehicule")
+    )
+
+    par_vehicule = {}
+    for position in positions:
+        par_vehicule.setdefault(position.vehicule_id, []).append(position)
+
+    resultat = []
+    for releves in par_vehicule.values():
+        total = 0.0
+        for precedent, suivant in zip(releves, releves[1:]):
+            total += distance_km(
+                (float(precedent.latitude), float(precedent.longitude)),
+                (float(suivant.latitude), float(suivant.longitude)),
+            )
+        resultat.append((releves[0].vehicule, round(total, 1)))
+
+    resultat.sort(key=lambda ligne: ligne[1], reverse=True)
+    return resultat
+
+
+def donnees_rapport_quotidien(jour=None):
+    """Tout ce que contient le rapport d'une journée, en un seul appel.
+
+    La commande et les deux gabarits d'e-mail lisent ce dictionnaire : il n'y
+    a donc qu'un endroit où le contenu du rapport est décidé. Si la version
+    texte et la version HTML calculaient chacune leurs totaux, elles
+    finiraient par ne plus dire la même chose.
+    """
+    jour = jour or timezone.localdate()
+
+    kilometres = kilometres_parcourus(jour)
+    pleins = annoter_consommations(
+        PleinCarburant.objects.filter(date=jour).select_related(
+            "vehicule", "chauffeur"
+        )
+    )
+    classement = classer_echeances(collecter_echeances(), today=jour)
+
+    return {
+        "jour": jour,
+        "kilometres": kilometres,
+        "total_km": round(sum(km for _vehicule, km in kilometres), 1),
+        "pleins": pleins,
+        "total_litres": sum((plein.litres for plein in pleins), Decimal("0")),
+        "total_cout": sum((plein.cout_total for plein in pleins), Decimal("0")),
+        "alertes": list(alertes_ouvertes()),
+        "classement": classement,
+        "nombre_echeances": (
+            len(classement["depassees"])
+            + len(classement["sous_30_j"])
+            + len(classement["sous_60_j"])
+        ),
+    }

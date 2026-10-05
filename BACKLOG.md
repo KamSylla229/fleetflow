@@ -4,7 +4,7 @@ Tout ce qui a été écarté du périmètre, avec la raison. Rien n'est ici « p
 plus tard » sans motif : un backlog qui ne dit pas pourquoi une idée a été
 repoussée finit par être relu comme une liste de manques.
 
-Dernière mise à jour : 01/10/2026 (fin de la phase A — thème).
+Dernière mise à jour : 05/10/2026 (fin de la phase C — alertes, échéances, rapport).
 
 ---
 
@@ -79,11 +79,11 @@ consommation moyenne par véhicule, top 5 des véhicules les plus coûteux. Tout
 existe en base ; c'est un travail d'agrégation (`annotate`, `aggregate`) et de
 présentation.
 
-### Écran d'alertes
-Une page unique rassemblant tout ce qui expire : assurances, visites
-techniques, permis, entretiens en retard. La logique existe déjà
-(`statut_echeance`, `statut_prochain_entretien`) ; il manque la requête qui
-sélectionne les lignes à problème **en SQL** plutôt qu'en Python.
+### ~~Écran d'alertes~~ — fait les 01 et 05/10/2026
+La page `/alertes/` liste les alertes ouvertes puis résolues, et la page
+Entretien range les échéances datées en trois colonnes. Les entretiens en
+retard gardent leur badge kilométrique dans leur propre tableau : voir plus
+bas « unifier les deux natures d'échéance ».
 
 C'est le point technique à connaître : « expiré » et « expire sous 30 jours »
 sont calculés en Python par rapport à la date du jour, donc impossibles à
@@ -92,10 +92,11 @@ filtrer avec un `filter()`. Deux voies : filtrer sur la date
 La liste des documents contourne aujourd'hui le problème en filtrant la page
 déjà chargée, ce qui ne marche que parce que les volumes sont faibles.
 
-### Envoi d'e-mails d'alerte
-Notifier le gestionnaire des échéances proches. Demande un compte SMTP, une
-tâche planifiée (`cron` ou `manage.py` appelé par le système), et une règle
-pour ne pas envoyer le même rappel tous les jours.
+### ~~Envoi d'e-mails d'alerte~~ — fait le 05/10/2026
+`verifier_signaux` et `verifier_echeances` préviennent le gérant une seule
+fois par problème — c'est le rôle du champ `email_envoye_le` et des trois
+contraintes d'unicité partielles. `rapport_quotidien --email` envoie le
+récapitulatif. Reste à brancher la tâche planifiée, ci-dessous.
 
 ### Export Excel des missions et des pleins
 Un gestionnaire de PME béninoise travaille sur tableur : pouvoir sortir les
@@ -132,6 +133,34 @@ coupée, donc chez le client.
 dépendance nouvelle) et `intcomma` sépare les milliers par une espace insécable
 (U+00A0) en locale `fr-fr` — vérifié avant application. Tous les kilométrages et
 les montants passent par ce filtre.
+
+### Tâche planifiée pour le rapport quotidien
+`rapport_quotidien --email` est prêt et n'envoie rien sans cette option. Il
+reste à l'appeler une fois par jour depuis l'hébergeur (un *cron job* Render,
+ou l'équivalent). À décider en même temps : l'heure d'envoi, et si le rapport
+doit porter sur la journée écoulée (`--date` de la veille) plutôt que sur la
+journée en cours, ce qui est plus logique pour un envoi du matin.
+
+### Indicateur : assurance manquante
+Un camion sans aucune attestation d'assurance **n'apparaît pas** dans les
+trois colonnes d'échéances et ne déclenche aucune alerte. C'est voulu : une
+pièce absente n'a pas de date, donc pas d'échéance — ce n'est pas un retard,
+c'est un dossier incomplet.
+
+Mais c'est un problème au moins aussi grave qu'une assurance expirée, et
+aujourd'hui il ne se voit que sur la fiche du camion, par le badge
+« Aucune attestation ». Il faudrait un indicateur à part — « N camions sans
+assurance enregistrée » — avec sa propre liste. Les briques existent :
+`services.statut_assurance()` renvoie déjà le code `ECHEANCE_ABSENTE`, et
+`est_alerte` le compte comme une alerte.
+
+### Unifier les deux natures d'échéance
+Les échéances datées (pièces, permis) et kilométriques (entretiens) vivent
+dans deux endroits distincts de la page Entretien, parce que « dépassé de
+17 jours » et « dépassé de 1 000 km » ne se comparent pas. Une vraie
+unification demanderait de convertir les kilomètres en jours à partir du
+rythme d'usage du camion — faisable à partir des positions GPS, mais c'est un
+modèle de prévision, pas un affichage.
 
 ### `collectstatic` et service des fichiers statiques en production
 En développement, `django.contrib.staticfiles` sert `static/` tout seul. En

@@ -1,0 +1,38 @@
+{% load humanize %}FleetFlow — rapport du {{ jour|date:"d/m/Y" }}
+======================================================
+
+KILOMÉTRAGE DE LA JOURNÉE
+{% if kilometres %}{% for vehicule, km in kilometres %}  {{ vehicule.immatriculation|ljust:"14" }}{{ km|stringformat:"8.1f" }} km
+{% endfor %}  ----------------------------------
+  Total{{ total_km|stringformat:"17.1f" }} km
+
+  Distances mesurées entre relevés GPS : elles sous-estiment légèrement le
+  compteur, chaque segment coupant la courbe de la route.
+{% else %}  Aucun relevé GPS pour cette journée.
+{% endif %}
+CARBURANT
+{% if pleins %}{% for plein in pleins %}  {{ plein.vehicule.immatriculation|ljust:"14" }}{{ plein.litres|stringformat:"7.2f" }} L   {{ plein.cout_total|floatformat:0|intcomma }} F{% if plein.consommation %}   {{ plein.consommation }} L/100 km{% else %}   premier plein du camion{% endif %}
+{% endfor %}  ----------------------------------
+  Total           {{ total_litres|floatformat:2 }} L   {{ total_cout|floatformat:0|intcomma }} F
+{% else %}  Aucun plein enregistré pour cette journée.
+{% endif %}
+ALERTES OUVERTES ({{ alertes|length }})
+{% if alertes %}{% for alerte in alertes %}  [{{ alerte.get_type_alerte_display }}] {{ alerte.message }}
+    ouverte depuis le {{ alerte.ouverte_le|date:"d/m/Y à H:i" }}{% if not alerte.email_envoye_le %} — gérant pas encore prévenu{% endif %}
+{% endfor %}{% else %}  Aucune alerte ouverte.
+{% endif %}
+ÉCHÉANCES
+  Dépassées ({{ classement.depassees|length }})
+{% for item in classement.depassees %}    {{ item.libelle }} : {{ item.jours }} j ({{ item.detail }})
+{% empty %}    aucune
+{% endfor %}
+  Sous 30 jours ({{ classement.sous_30_j|length }})
+{% for item in classement.sous_30_j %}    {{ item.libelle }} : {{ item.jours }} j ({{ item.detail }})
+{% empty %}    aucune
+{% endfor %}
+  Sous 60 jours ({{ classement.sous_60_j|length }})
+{% for item in classement.sous_60_j %}    {{ item.libelle }} : {{ item.jours }} j ({{ item.detail }})
+{% empty %}    aucune
+{% endfor %}
+--
+FleetFlow, gestion de flotte. Message automatique, ne pas répondre.
