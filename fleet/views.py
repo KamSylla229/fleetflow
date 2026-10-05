@@ -15,9 +15,11 @@ from datetime import timedelta
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.humanize.templatetags.humanize import intcomma
 from django.contrib.messages.views import SuccessMessageMixin
 from django.core.exceptions import ValidationError
 from django.db.models import Q
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -35,6 +37,7 @@ from django.views.generic import (
 
 from . import services
 from .echeances import classer_echeances, collecter_echeances
+from .kpi import calculer_kpi
 from .forms import (
     ChauffeurForm,
     ClotureMissionForm,
@@ -57,9 +60,10 @@ from .models import (
 class AccueilView(LoginRequiredMixin, RedirectView):
     """La racine du site mène à la liste des véhicules.
 
-    Le tableau de bord avec indicateurs n'existe pas encore ; en attendant,
-    rediriger vaut mieux qu'une page vide, et l'adresse d'accueil ne changera
-    pas le jour où ce tableau de bord arrivera.
+    Elle n'ouvre pas le tableau de bord, bien qu'il existe depuis la phase D :
+    changer la destination de l'accueil change l'habitude de tous les
+    utilisateurs et casse les favoris. La bascule est notée dans BACKLOG.md,
+    pour être décidée pour elle-même et non en passant.
     """
 
     pattern_name = "fleet:vehicule_liste"
@@ -858,3 +862,179 @@ def alerte_bandeau(request):
     rien à calculer.
     """
     return render(request, "partials/_bandeau_alertes.html")
+
+
+# --- Tableau de bord ---------------------------------------------------------
+
+
+def _indicateurs_affichables(donnees):
+    """Met en forme les cinq indicateurs, pour le gabarit comme pour le JSON.
+
+    Les deux chemins — le rendu initial de la page et le rafraîchissement par
+    l'endpoint — passent par cette fonction. C'est ce qui garantit qu'une
+    valeur ne change pas de forme au premier rafraîchissement : si le gabarit
+    écrivait « 13 584 » et le JavaScript « 13584 », le chiffre sauterait sous
+    les yeux de l'utilisateur dix secondes après l'ouverture de la page.
+
+    Les nombres sont donc formatés **ici**, côté serveur. Les reformater en
+    français dans le navigateur reviendrait à écrire deux fois la même règle,
+    dans deux langages, et à les voir diverger.
+    """
+    total = donnees["total_camions"]
+    en_mouvement = donnees["en_mouvement"]
+    en_maintenance = donnees["en_maintenance"]
+    consommation = donnees["consommation_moy"]
+    depassees = donnees["depassees"]
+
+    return [
+        {
+            "cle": "en_service",
+            "libelle": "Camions en service",
+            "valeur": intcomma(donnees["en_service"]),
+            "unite": f"/ {total}",
+            "aide": (
+                f"{en_maintenance} en maintenance"
+                if en_maintenance
+                else "aucun camion en maintenance"
+            ),
+            "variante": "",
+        },
+        {
+            "cle": "en_mouvement",
+            "libelle": "En mouvement",
+            "valeur": intcomma(en_mouvement),
+            "unite": "camion" if en_mouvement == 1 else "camions",
+            "aide": "d'après le dernier relevé des boîtiers",
+            # La carte mise en avant est celle qui bouge : c'est
+            # l'information vivante de la page.
+            "variante": "avant",
+        },
+        {
+            "cle": "km_du_jour",
+            "libelle": "Kilométrage du jour",
+            # Arrondi à l'unité : sur une carte, « 13 584 » se lit d'un coup
+            # d'œil là où « 13 583,8 » promet une précision que la mesure n'a
+            # pas (voir services.kilometres_parcourus).
+            "valeur": intcomma(round(donnees["km_du_jour"])),
+            "unite": "km",
+            "aide": "somme des distances entre relevés GPS",
+            "variante": "",
+        },
+        {
+            "cle": "consommation_moy",
+            "libelle": "Consommation flotte",
+            # Un tiret et jamais zéro : « on ne sait pas encore » n'est pas
+            # « la flotte ne consomme rien ».
+            "valeur": "—" if consommation is None else intcomma(consommation),
+            "unite": "" if consommation is None else "L/100 km",
+            "aide": (
+                "pas encore deux pleins sur un même camion"
+                if consommation is None
+                else f"pondérée, {services.FENETRE_CONSOMMATION_JOURS} derniers jours"
+            ),
+            "variante": "",
+        },
+        {
+            "cle": "echeances_60j",
+            "libelle": "Échéances sous 60 jours",
+            "valeur": intcomma(donnees["echeances_60j"]),
+            "unite": "pièce" if donnees["echeances_60j"] == 1 else "pièces",
+            "aide": (
+                f"dont {depassees} dépassée{'s' if depassees > 1 else ''}"
+                if depassees
+                else "aucune dépassée"
+            ),
+            "variante": "alerte" if depassees else "",
+        },
+    ]
+
+
+def _km_par_camion_affichable(donnees):
+    """Les barres de kilométrage : plaque, valeur formatée, largeur en pour cent.
+
+    La largeur est calculée ici et non dans le gabarit : un pourcentage est un
+    calcul, et {% widthratio %} se relit mal. Elle est relative au camion qui
+    a le plus roulé, pour que la barre la plus longue remplisse la ligne — la
+    page sert à comparer les camions entre eux, pas à lire des valeurs
+    absolues sur une échelle commune.
+    """
+    lignes = donnees["km_par_camion"]
+    maximum = max((km for _vehicule, km in lignes), default=0)
+    return [
+        {
+            "immatriculation": vehicule.immatriculation,
+            "url": vehicule.get_absolute_url(),
+            "km": intcomma(round(km)),
+            "part": round(km / maximum * 100) if maximum else 0,
+        }
+        for vehicule, km in lignes
+    ]
+
+
+# Nombre d'échéances montrées sur le tableau de bord. Au-delà, un lien renvoie
+# vers la page Entretien : un tableau de bord donne l'alerte et l'ordre de
+# grandeur, la liste complète a déjà sa page.
+ECHEANCES_AFFICHEES = 8
+
+
+class DashboardView(LoginRequiredMixin, TemplateView):
+    """Le tableau de bord : cinq indicateurs, les échéances, les alertes.
+
+    Le rendu initial affiche des valeurs justes — la page n'attend pas le
+    premier appel de l'endpoint pour montrer quelque chose, et reste lisible
+    si le JavaScript ne tourne jamais. C'est le même dictionnaire qui sert aux
+    deux chemins.
+    """
+
+    template_name = "fleet/dashboard.html"
+
+    def get_context_data(self, **kwargs):
+        contexte = super().get_context_data(**kwargs)
+
+        donnees = calculer_kpi()
+        classement = donnees["classement"]
+
+        # Dépassées puis sous 30 jours : les deux listes arrivent déjà triées
+        # par urgence de classer_echeances(), et les concaténer conserve cet
+        # ordre. Aucun tri, aucune comparaison de dates ici.
+        urgentes = classement["depassees"] + classement["sous_30_j"]
+
+        contexte["donnees"] = donnees
+        contexte["indicateurs"] = _indicateurs_affichables(donnees)
+        contexte["km_par_camion"] = _km_par_camion_affichable(donnees)
+        contexte["echeances"] = urgentes[:ECHEANCES_AFFICHEES]
+        contexte["echeances_restantes"] = max(len(urgentes) - ECHEANCES_AFFICHEES, 0)
+        contexte["mesure_le"] = timezone.localtime().strftime("%H:%M:%S")
+        return contexte
+
+
+@login_required
+def dashboard_kpi(request):
+    """Les indicateurs en JSON, réinterrogés toutes les dix secondes.
+
+    @login_required, et non une vérification écrite dans le corps de la
+    fonction : un visiteur anonyme est redirigé vers la connexion et
+    **n'obtient aucune donnée**. Un tableau de bord expose la facture de
+    carburant et la position des camions d'une PME ; ce n'est pas une page
+    publique, et un endpoint JSON oublié est exactement le genre de porte
+    qu'on ne voit pas.
+
+    Renvoie du JSON là où le bandeau d'alertes renvoyait un fragment HTML, et
+    la raison est l'inverse de celle d'alors : ici le script ne remplace pas
+    un bloc entier, mais quelques nombres à l'intérieur de cartes qui
+    existent déjà. Remplacer le HTML ferait clignoter toute la page à chaque
+    passage.
+
+    Les valeurs sont déjà formatées : voir _indicateurs_affichables.
+    """
+    donnees = calculer_kpi()
+    return JsonResponse(
+        {
+            "indicateurs": _indicateurs_affichables(donnees),
+            "km_par_camion": _km_par_camion_affichable(donnees),
+            # L'heure du serveur, affichée sous le titre : elle dit à
+            # l'utilisateur que les chiffres sont frais, ce qu'aucun compteur
+            # ne sait faire tout seul.
+            "mesure_le": timezone.localtime().strftime("%H:%M:%S"),
+        }
+    )

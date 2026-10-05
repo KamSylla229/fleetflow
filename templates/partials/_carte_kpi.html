@@ -5,13 +5,28 @@
     unite    (optionnel)   — « km », « L/100 », « ans »
     aide     (optionnel)   — ligne grise sous la valeur
     variante (optionnel)   — "avant" (mise en avant verte) ou "alerte" (rouge)
+    cle      (optionnel)   — nom de l'indicateur pour le rafraîchissement JSON
 
   Appel : {% include "partials/_carte_kpi.html" with libelle="…" valeur=… only %}
+
+  `cle` pose les attributs data-kpi* que static/js/dashboard.js retrouve pour
+  remplacer valeur, unité, ligne d'aide et couleur sans recharger la page. Les
+  pages qui ne rafraîchissent rien — la liste des camions, par exemple — ne le
+  passent pas, et le balisage produit est alors exactement celui d'avant.
+
+  Le span de l'unité est rendu **même vide** quand `cle` est donné : une unité
+  peut apparaître en cours de route (« — » devient « 31,4 L/100 km » au
+  premier plein exploitable), et le script n'a rien à remplir si la balise
+  n'existe pas. C'est le même raisonnement que le conteneur vide du bandeau
+  d'alertes dans base.html.
 {% endcomment %}
-<div class="ff-kpi{% if variante %} ff-kpi--{{ variante }}{% endif %}">
+<div class="ff-kpi{% if variante %} ff-kpi--{{ variante }}{% endif %}"
+     {% if cle %}data-kpi-carte="{{ cle }}"{% endif %}>
   <p class="ff-kpi__libelle">{{ libelle }}</p>
   <p class="ff-kpi__valeur">
-    {{ valeur }}{% if unite %}<span class="ff-kpi__unite">{{ unite }}</span>{% endif %}
+    <span {% if cle %}data-kpi="{{ cle }}"{% endif %}>{{ valeur }}</span>{% if unite or cle %}<span class="ff-kpi__unite" {% if cle %}data-kpi-unite="{{ cle }}"{% endif %}>{{ unite }}</span>{% endif %}
   </p>
-  {% if aide %}<p class="ff-kpi__aide">{{ aide }}</p>{% endif %}
+  {% if aide %}
+    <p class="ff-kpi__aide" {% if cle %}data-kpi-aide="{{ cle }}"{% endif %}>{{ aide }}</p>
+  {% endif %}
 </div>

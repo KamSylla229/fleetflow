@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% comment %}
+  Le tableau de bord — calqué sur docs/maquette/01-dashboard.png.
+
+  Deux principes gouvernent ce gabarit.
+
+  Le premier : il n'additionne, ne trie et ne compare **rien**. Tout vient de
+  fleet/kpi.py (les chiffres) et de la vue DashboardView (leur mise en forme).
+  Les cinq cartes sont même parcourues en boucle sur une liste de
+  dictionnaires, au lieu d'être écrites une par une : ajouter un indicateur se
+  fait alors dans _indicateurs_affichables, à un seul endroit, et le
+  rafraîchissement JSON le reçoit sans qu'on y pense.
+
+  Le second : la page est **juste avant que le JavaScript ne tourne**, et le
+  reste s'il ne tourne jamais. Le serveur a déjà écrit les valeurs ; le script
+  ne fait que les remplacer toutes les dix secondes. Un navigateur sans
+  JavaScript affiche un tableau de bord figé, pas un tableau de bord vide.
+{% endcomment %}
+
+{% block titre %}Tableau de bord — FleetFlow{% endblock %}
+{% block titre_page %}Tableau de bord{% endblock %}
+{% block sous_titre %}
+  {{ donnees.today|date:"l j F Y" }} ·
+  {% comment %}
+    L'heure de mesure est celle du serveur, et le script la récrit à chaque
+    passage. Sans elle, rien ne distinguerait une page fraîche d'une page
+    laissée ouverte depuis la veille, dont les chiffres ne bougeraient plus
+    faute de connexion.
+  {% endcomment %}
+  relevé à <span class="ff-chiffre" data-kpi-mesure>{{ mesure_le }}</span>,
+  actualisé toutes les 10 s
+{% endblock %}
+
+{% block actions %}
+  <a class="ff-btn ff-btn--secondaire" href="{% url 'fleet:entretien_liste' %}">
+    <i class="bi bi-calendar-check" aria-hidden="true"></i> Échéances
+  </a>
+  <a class="ff-btn ff-btn--principal" href="{% url 'fleet:mission_creer' %}">
+    <i class="bi bi-plus-lg" aria-hidden="true"></i> Nouvelle mission
+  </a>
+{% endblock %}
+
+{% block contenu %}
+
+{% comment %}
+  C'est ce conteneur que static/js/dashboard.js cherche : s'il est absent, le
+  script s'arrête sans rien faire. L'adresse de l'endpoint est portée par un
+  attribut data et non écrite dans le fichier .js, pour que {% url %} reste
+  l'unique source des adresses du projet — un fichier statique ne sait pas
+  résoudre un nom de route.
+{% endcomment %}
+<div id="tableau-de-bord"
+     data-kpi-url="{% url 'fleet:dashboard_kpi' %}">
+
+  <div class="ff-kpis">
+    {% for indicateur in indicateurs %}
+      {% include "partials/_carte_kpi.html" with libelle=indicateur.libelle valeur=indicateur.valeur unite=indicateur.unite aide=indicateur.aide variante=indicateur.variante cle=indicateur.cle only %}
+    {% endfor %}
+  </div>
+
+  <div class="ff-grille ff-grille--2 mt-4">
+
+    {% comment %}
+      Les échéances dépassées puis celles sous trente jours, dans l'ordre que
+      classer_echeances a déjà fixé. La couleur de chaque ligne vient de
+      `item.depassee`, une propriété de EcheanceClassee : le gabarit lit un
+      booléen, il ne compare aucune date.
+    {% endcomment %}
+    <div class="ff-carte">
+      <div class="ff-carte__entete{% if donnees.depassees %} ff-carte__entete--rouge{% endif %}">
+        <h2 class="ff-carte__titre">À renouveler</h2>
+        <span class="ff-carte__compteur">{{ donnees.echeances_60j }}</span>
+      </div>
+      <div class="ff-carte__corps">
+        {% for item in echeances %}
+          <div class="ff-echeance">
+            <span class="ff-echeance__libelle">
+              {% if item.url %}
+                <a href="{{ item.url }}">{{ item.libelle }}</a>
+              {% else %}
+                {{ item.libelle }}
+              {% endif %}
+              <span class="ff-sous-ligne">{{ item.detail }}</span>
+            </span>
+            <span class="ff-echeance__jours ff-echeance__jours--{% if item.depassee %}rouge{% else %}ambre{% endif %}">
+              {{ item.jours }} j
+            </span>
+          </div>
+        {% empty %}
+          <p class="ff-champ__aide mb-0">
+            Rien à renouveler dans le mois.
+          </p>
+        {% endfor %}
+      </div>
+      <div class="ff-carte__pied">
+        <a href="{% url 'fleet:entretien_liste' %}">
+          {% if echeances_restantes %}
+            Voir les {{ echeances_restantes }} autre{{ echeances_restantes|pluralize }}
+            et les échéances sous 60 jours
+          {% else %}
+            Voir toutes les échéances
+          {% endif %}
+        </a>
+      </div>
+    </div>
+
+    {% comment %}
+      Les alertes ouvertes. Les durées portent data-depuis : le script
+      compteur-alerte.js, déjà chargé par base.html pour le bandeau, les fait
+      avancer seconde par seconde sans que ce gabarit ait quoi que ce soit à
+      demander.
+    {% endcomment %}
+    <div class="ff-carte">
+      <div class="ff-carte__entete{% if donnees.alertes %} ff-carte__entete--ambre{% endif %}">
+        <h2 class="ff-carte__titre">Alertes ouvertes</h2>
+        <span class="ff-carte__compteur">{{ donnees.alertes|length }}</span>
+      </div>
+      <div class="ff-carte__corps">
+        {% for alerte in donnees.alertes %}
+          <div class="ff-echeance">
+            <span class="ff-echeance__libelle">
+              {% if alerte.vehicule %}
+                <a href="{{ alerte.vehicule.get_absolute_url }}" class="ff-chiffre">
+                  {{ alerte.vehicule.immatriculation }}
+                </a>
+              {% elif alerte.chauffeur %}
+                <a href="{{ alerte.chauffeur.get_absolute_url }}">
+                  {{ alerte.chauffeur.nom }}
+                </a>
+              {% else %}
+                <a href="{{ alerte.document.vehicule.get_absolute_url }}"
+                   class="ff-chiffre">
+                  {{ alerte.libelle_objet }}
+                </a>
+              {% endif %}
+              <span class="ff-sous-ligne">{{ alerte.message }}</span>
+            </span>
+            <span class="ff-echeance__jours ff-chiffre"
+                  data-depuis="{{ alerte.ouverte_le|date:'c' }}">
+              {{ alerte.ouverte_le|timesince }}
+            </span>
+          </div>
+        {% empty %}
+          <p class="ff-champ__aide mb-0">
+            Aucune alerte ouverte. Tous les boîtiers répondent.
+          </p>
+        {% endfor %}
+      </div>
+      <div class="ff-carte__pied">
+        <a href="{% url 'fleet:alerte_liste' %}">Voir l'historique des alertes</a>
+      </div>
+    </div>
+
+  </div>
+
+  {% comment %}
+    Le kilométrage du jour, camion par camion. Les barres sont relatives au
+    camion qui a le plus roulé : la page sert à repérer celui qui sort du lot,
+    pas à lire des valeurs sur une échelle commune. La largeur est calculée
+    dans la vue (_km_par_camion_affichable).
+  {% endcomment %}
+  <div class="ff-carte mt-4">
+    <div class="ff-carte__entete">
+      <h2 class="ff-carte__titre">Kilométrage du jour par camion</h2>
+      <span class="ff-carte__compteur">{{ km_par_camion|length }}</span>
+    </div>
+    <div class="ff-carte__corps" data-km-liste>
+      {% for ligne in km_par_camion %}
+        <div class="ff-jauge">
+          <a class="ff-jauge__libelle ff-chiffre" href="{{ ligne.url }}">
+            {{ ligne.immatriculation }}
+          </a>
+          <span class="ff-jauge__piste">
+            <span class="ff-jauge__remplissage" style="width: {{ ligne.part }}%"></span>
+          </span>
+          <span class="ff-jauge__valeur ff-chiffre">{{ ligne.km }} km</span>
+        </div>
+      {% empty %}
+        <p class="ff-champ__aide mb-0">
+          Aucun relevé GPS aujourd'hui : lancez
+          <code>python manage.py simuler_positions --boucle</code>.
+        </p>
+      {% endfor %}
+    </div>
+  </div>
+
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+  <script src="{% static 'js/dashboard.js' %}"></script>
+{% endblock %}

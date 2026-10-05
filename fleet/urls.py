@@ -17,6 +17,13 @@ app_name = "fleet"
 
 urlpatterns = [
     path("", views.AccueilView.as_view(), name="accueil"),
+    # --- Tableau de bord ---
+    path("dashboard/", views.DashboardView.as_view(), name="dashboard"),
+    # Les indicateurs seuls, en JSON, pour le rafraichissement du script. La
+    # route est sous celle de la page et non a cote : si la page exige une
+    # authentification, l'endpoint qui porte les memes chiffres doit l'exiger
+    # aussi, et les lire cote a cote est la facon la plus simple de le voir.
+    path("dashboard/kpi/", views.dashboard_kpi, name="dashboard_kpi"),
     # --- Véhicules ---
     path("vehicules/", views.VehiculeListView.as_view(), name="vehicule_liste"),
     path(

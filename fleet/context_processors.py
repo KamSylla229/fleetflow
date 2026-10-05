@@ -14,6 +14,7 @@ page du site. Celui-ci n'en fait aucune.
 # (« vehicule_liste », « mission_cloturer »). On s'en sert pour deviner
 # l'onglet, au lieu d'énumérer les trente routes du projet.
 PREFIXES_NAVIGATION = (
+    ("dashboard", "dashboard"),
     ("vehicule", "camions"),
     ("chauffeur", "chauffeurs"),
     ("mission", "missions"),

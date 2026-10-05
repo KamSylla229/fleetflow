@@ -66,17 +66,34 @@ class OssatureDesPagesTest(TestCase):
                 self.assertEqual(reponse.context["nav_actif"], onglet)
 
     def test_les_entrees_sans_page_ne_sont_pas_cliquables(self):
-        """Tableau de bord, Carte, Rapports et Fournisseurs GPS sont annoncés.
+        """Carte, Rapports et Fournisseurs GPS sont annoncés sans être cliquables.
 
         Ce sont des <span> et non des liens : une entrée désactivée reste
         atteignable au clavier et promet une destination qui n'existe pas.
+
+        « Tableau de bord » a quitté cette liste en phase D : la page existe,
+        l'entrée est devenue un vrai lien. Voir le test suivant.
         """
         reponse = self.client.get(reverse("fleet:vehicule_liste"))
-        for libelle in ["Tableau de bord", "Carte", "Rapports", "Fournisseurs GPS"]:
+        for libelle in ["Carte", "Rapports", "Fournisseurs GPS"]:
             with self.subTest(libelle=libelle):
                 self.assertContains(reponse, libelle)
         self.assertContains(reponse, "ff-nav__item--bientot")
         self.assertContains(reponse, "bientôt")
+
+    def test_l_entree_du_tableau_de_bord_est_un_lien(self):
+        """Elle était un <span> « bientôt » jusqu'à la phase D.
+
+        Le test précédent et celui-ci se tiennent par la main : le premier
+        dit ce qui n'existe pas encore, le second ce qui vient d'arriver. Une
+        page livrée dont le menu annonce toujours « bientôt », c'est un menu
+        qui ment, et rien d'autre ne le verrait.
+        """
+        reponse = self.client.get(reverse("fleet:vehicule_liste"))
+        self.assertContains(reponse, f'href="{reverse("fleet:dashboard")}"')
+        contenu = reponse.content.decode("utf-8")
+        debut = contenu.index("Tableau de bord")
+        self.assertNotIn("bientôt", contenu[debut - 200 : debut + 200])
 
     def test_la_page_de_connexion_n_a_pas_de_navigation(self):
         """Elle hérite de base_public.html : ni sidebar, ni menu."""
@@ -123,6 +140,7 @@ class RessourcesLocalesTest(TestCase):
         "vendor/icones/bootstrap-icons.css",
         "vendor/icones/fonts/bootstrap-icons.woff2",
         "js/compteur-alerte.js",
+        "js/dashboard.js",
     )
 
     def setUp(self):
@@ -134,6 +152,7 @@ class RessourcesLocalesTest(TestCase):
 
     def test_aucune_page_ne_pointe_vers_un_cdn(self):
         adresses = [
+            reverse("fleet:dashboard"),
             reverse("fleet:vehicule_liste"),
             reverse("fleet:chauffeur_liste"),
             reverse("fleet:mission_liste"),
@@ -447,6 +466,7 @@ class SyntaxeDesGabaritsTest(TestCase):
 
     def adresses(self):
         return [
+            reverse("fleet:dashboard"),
             reverse("fleet:vehicule_liste"),
             reverse("fleet:vehicule_detail", args=[self.vehicule.pk]),
             reverse("fleet:vehicule_creer"),

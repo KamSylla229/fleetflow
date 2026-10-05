@@ -202,3 +202,25 @@ elle existera sur une machine ayant accès à une base de production.
 deux écritures simultanées : SQLite ignore l'instruction, et il faudrait deux
 connexions sur PostgreSQL pour le vérifier. À faire au moment du passage à
 PostgreSQL, avec `TransactionTestCase` et deux fils d'exécution.
+
+### Faire du tableau de bord la page d'accueil
+`AccueilView` redirige vers la liste des camions, décidé quand le tableau de
+bord n'existait pas. Maintenant qu'il existe, c'est probablement lui qu'un
+gérant veut voir en arrivant. Pas changé en passant : l'adresse d'accueil est
+l'habitude de tous les utilisateurs et le favori qu'ils ont posé. À décider
+pour elle-même, avec le client.
+
+### Filtrer le tableau de bord par période
+La maquette `01-dashboard.png` porte trois boutons « Jour / 7 jours / Mois » et
+un bouton « Exporter ». `calculer_kpi()` ne connaît qu'une date de référence :
+les kilomètres sont ceux du jour, et la consommation ceux des trente derniers
+jours, deux fenêtres figées. Les rendre réglables demande de passer la fenêtre
+à `kilometres_parcourus` comme on l'a fait pour `_cumuls_carburant`, et de
+décider ce que « en service » veut dire sur une semaine — un camion disponible
+aujourd'hui l'était-il lundi ? L'historique des statuts n'existe pas, donc la
+réponse est non, et c'est la vraie difficulté de ce point.
+
+### L'entrée « Tableau de bord » du menu ne déborde plus
+Le point « Deux entrées de menu passent sur deux lignes » ci-dessus est résolu
+pour moitié : la pastille « bientôt » a disparu de cette entrée en phase D,
+comme prévu. Reste « Fournisseurs GPS ».
