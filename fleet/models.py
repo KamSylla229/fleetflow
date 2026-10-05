@@ -745,7 +745,12 @@ class Alerte(models.Model):
 
     class TypeAlerte(models.TextChoices):
         SANS_SIGNAL = "sans_signal", "Boîtier sans signal"
-        ECHEANCE = "echeance", "Échéance"
+        # Deux types d'échéance et non un seul : une pièce à renouveler et un
+        # permis à refaire ne se traitent pas au même endroit ni par les mêmes
+        # personnes. Les séparer rend aussi les contraintes d'unicité
+        # lisibles — l'une porte sur le document, l'autre sur le chauffeur.
+        ECHEANCE = "echeance", "Pièce à renouveler"
+        ECHEANCE_PERMIS = "echeance_permis", "Permis à renouveler"
 
     # Le champ s'appelle type_alerte et non « type » : les autres modèles du
     # projet utilisent déjà type_vehicule, type_entretien et type_document, et

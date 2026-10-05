@@ -22,8 +22,8 @@ from django.urls import reverse
 from django.utils import timezone
 
 from fleet import services
-from fleet.models import Alerte, FournisseurGPS, PositionGPS
-from fleet.tests.fabriques import creer_chauffeur, creer_vehicule
+from fleet.models import Alerte, Document, FournisseurGPS, PositionGPS
+from fleet.tests.fabriques import creer_chauffeur, creer_document, creer_vehicule
 
 GERANT = "gerant@fleetflow.invalid"
 
@@ -420,3 +420,346 @@ class CommandeEtAlertesTest(TestCase):
         self.assertEqual(len(mail.outbox), 1)
         # La sortie reste en ASCII, y compris les lignes d'alerte.
         sortie.getvalue().encode("ascii")
+
+
+@override_settings(
+    EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+    FLEETFLOW_EMAIL_GERANT=GERANT,
+)
+class VerifierEcheancesTest(TestCase):
+    """Les alertes d'échéance : ouverture unique, et résolution au renouvellement."""
+
+    def setUp(self):
+        self.aujourdhui = timezone.localdate()
+        self.maintenant = timezone.now()
+        self.vehicule = creer_vehicule(immatriculation="AB 1234 RB")
+
+    def _verifier(self, maintenant=None):
+        """Appelle le service en laissant partir les notifications.
+
+        captureOnCommitCallbacks : sans lui, transaction.on_commit n'est
+        jamais exécuté dans un TestCase, et les tests d'e-mail passeraient
+        avec une boîte vide.
+        """
+        with self.captureOnCommitCallbacks(execute=True):
+            return services.verifier_echeances(maintenant=maintenant or self.maintenant)
+
+    def _document(self, jours, type_document=None):
+        return creer_document(
+            self.vehicule,
+            type_document or Document.TypeDocument.ASSURANCE,
+            jours=jours,
+        )
+
+    # --- Ouverture -----------------------------------------------------------
+
+    def test_une_piece_depassee_ouvre_une_alerte(self):
+        self._document(jours=-17)
+
+        bilan = self._verifier()
+
+        self.assertEqual(len(bilan["ouvertes"]), 1)
+        alerte = Alerte.objects.get()
+        self.assertEqual(alerte.type_alerte, Alerte.TypeAlerte.ECHEANCE)
+        self.assertIsNotNone(alerte.document_id)
+        self.assertIn("Assurance", alerte.message)
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_une_piece_sous_trente_jours_ouvre_une_alerte(self):
+        self._document(jours=12)
+        self.assertEqual(len(self._verifier()["ouvertes"]), 1)
+
+    def test_une_piece_au_dela_de_trente_jours_n_ouvre_rien(self):
+        """Sous 60 jours s'affiche sur la page, mais n'alerte pas encore."""
+        self._document(jours=45)
+        self.assertEqual(self._verifier()["ouvertes"], [])
+        self.assertEqual(Alerte.objects.count(), 0)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_la_borne_exacte_de_trente_jours_alerte(self):
+        self._document(jours=30)
+        self.assertEqual(len(self._verifier()["ouvertes"]), 1)
+
+    def test_le_message_porte_une_date_et_non_un_compte_a_rebours(self):
+        """« dans 12 jours » serait faux le lendemain, et l'alerte dure.
+
+        Comme elle n'est jamais recréée tant que le problème persiste, un
+        texte relatif vivrait des semaines après être devenu inexact.
+        """
+        document = self._document(jours=12)
+        self._verifier()
+        message = Alerte.objects.get().message
+        self.assertIn(document.date_expiration.strftime("%d/%m/%Y"), message)
+        self.assertNotIn("12 jour", message)
+
+    # --- Jamais deux fois ----------------------------------------------------
+
+    def test_jamais_deux_alertes_pour_la_meme_piece(self):
+        self._document(jours=-5)
+
+        self._verifier()
+        self._verifier()
+        self._verifier()
+
+        self.assertEqual(Alerte.objects.count(), 1)
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_de_sous_trente_jours_a_depassee_la_meme_alerte_reste(self):
+        """Exigence explicite : pas de résolution-puis-recréation.
+
+        Résoudre l'ancienne alerte pour en créer une au message plus juste
+        renverrait un e-mail au gérant pour un problème qu'il connaît déjà, et
+        ferait perdre la date d'ouverture — donc l'ancienneté du retard.
+        """
+        self._document(jours=3)
+        self._verifier()
+        alerte = Alerte.objects.get()
+        ouverture = alerte.ouverte_le
+
+        # Dix jours plus tard, la pièce est dépassée depuis une semaine.
+        plus_tard = self.maintenant + timedelta(days=10)
+        bilan = self._verifier(maintenant=plus_tard)
+
+        self.assertEqual(bilan["ouvertes"], [])
+        self.assertEqual(bilan["resolues"], [])
+        self.assertEqual(Alerte.objects.count(), 1)
+        self.assertEqual(len(mail.outbox), 1)
+
+        alerte.refresh_from_db()
+        self.assertTrue(alerte.est_ouverte)
+        self.assertEqual(alerte.ouverte_le, ouverture)
+
+    # --- Résolution ----------------------------------------------------------
+
+    def test_le_renouvellement_resout_l_alerte(self):
+        """Le piège : l'alerte porte sur un document qui n'est plus en vigueur.
+
+        Une assurance périmée ouvre une alerte. On enregistre la nouvelle
+        attestation : l'ancienne pièce disparaît de la collecte, puisque seule
+        la plus lointaine par couple (camion, type) est retenue. Sans
+        traitement explicite, l'alerte de l'ancien document resterait ouverte
+        pour toujours.
+        """
+        ancienne = self._document(jours=-20)
+        self._verifier()
+        alerte = Alerte.objects.get()
+        self.assertEqual(alerte.document_id, ancienne.pk)
+
+        # Renouvellement : nouvelle attestation valable un an.
+        self._document(jours=345)
+        bilan = self._verifier()
+
+        self.assertEqual(len(bilan["resolues"]), 1)
+        alerte.refresh_from_db()
+        self.assertFalse(alerte.est_ouverte)
+        self.assertIsNotNone(alerte.resolue_le)
+        # Aucune nouvelle alerte : la nouvelle pièce est à plus de 30 jours.
+        self.assertEqual(Alerte.objects.count(), 1)
+
+    def test_une_date_repoussee_au_dela_de_trente_jours_resout_l_alerte(self):
+        """Correction d'une saisie : la même pièce, une date corrigée."""
+        document = self._document(jours=5)
+        self._verifier()
+        self.assertEqual(Alerte.objects.filter(resolue_le__isnull=True).count(), 1)
+
+        document.date_expiration = self.aujourdhui + timedelta(days=200)
+        document.save(update_fields=["date_expiration"])
+
+        bilan = self._verifier()
+        self.assertEqual(len(bilan["resolues"]), 1)
+        self.assertEqual(Alerte.objects.filter(resolue_le__isnull=True).count(), 0)
+
+    def test_un_camion_sorti_de_la_flotte_resout_ses_alertes(self):
+        self._document(jours=-3)
+        self._verifier()
+
+        self.vehicule.actif = False
+        self.vehicule.save(update_fields=["actif"])
+
+        self.assertEqual(len(self._verifier()["resolues"]), 1)
+
+    def test_une_alerte_resolue_peut_se_reouvrir_plus_tard(self):
+        """La contrainte d'unicité ne porte que sur les alertes ouvertes."""
+        document = self._document(jours=5)
+        self._verifier()
+        document.date_expiration = self.aujourdhui + timedelta(days=200)
+        document.save(update_fields=["date_expiration"])
+        self._verifier()
+
+        # Un an passe : la même pièce redevient proche.
+        document.date_expiration = self.aujourdhui + timedelta(days=4)
+        document.save(update_fields=["date_expiration"])
+        bilan = self._verifier()
+
+        self.assertEqual(len(bilan["ouvertes"]), 1)
+        self.assertEqual(Alerte.objects.count(), 2)
+        self.assertEqual(Alerte.objects.filter(resolue_le__isnull=True).count(), 1)
+
+    # --- Cas particuliers ----------------------------------------------------
+
+    def test_une_piece_sans_date_ne_produit_rien(self):
+        """Une carte grise n'expire pas : ni alerte, ni erreur."""
+        creer_document(
+            self.vehicule,
+            Document.TypeDocument.CARTE_GRISE,
+            date_expiration=None,
+        )
+        bilan = self._verifier()
+        self.assertEqual(bilan["ouvertes"], [])
+        self.assertEqual(Alerte.objects.count(), 0)
+
+    def test_un_camion_sans_aucune_attestation_ne_produit_rien(self):
+        """Un dossier vide n'est pas un retard. Indicateur à part, au BACKLOG."""
+        self.assertEqual(self._verifier()["ouvertes"], [])
+        self.assertEqual(Alerte.objects.count(), 0)
+
+    def test_un_permis_a_dix_jours_alerte_sur_le_chauffeur(self):
+        chauffeur = creer_chauffeur(
+            date_expiration_permis=self.aujourdhui + timedelta(days=10)
+        )
+        self._document(jours=-4)
+
+        bilan = self._verifier()
+
+        self.assertEqual(len(bilan["ouvertes"]), 2)
+        permis = Alerte.objects.get(type_alerte=Alerte.TypeAlerte.ECHEANCE_PERMIS)
+        self.assertEqual(permis.chauffeur_id, chauffeur.pk)
+        self.assertIsNone(permis.document_id)
+        self.assertIn("Permis", permis.message)
+
+        # Le type est bien distinct de celui des pièces de camion.
+        piece = Alerte.objects.get(type_alerte=Alerte.TypeAlerte.ECHEANCE)
+        self.assertIsNotNone(piece.document_id)
+        self.assertIsNone(piece.chauffeur_id)
+
+    def test_un_permis_renouvele_resout_son_alerte(self):
+        chauffeur = creer_chauffeur(
+            date_expiration_permis=self.aujourdhui - timedelta(days=2)
+        )
+        self._verifier()
+        self.assertEqual(Alerte.objects.count(), 1)
+
+        chauffeur.date_expiration_permis = self.aujourdhui + timedelta(days=700)
+        chauffeur.save(update_fields=["date_expiration_permis"])
+
+        self.assertEqual(len(self._verifier()["resolues"]), 1)
+
+    def test_deux_camions_ont_chacun_leur_alerte(self):
+        """La contrainte est par document, pas par type d'alerte."""
+        autre = creer_vehicule(immatriculation="AC 4821 RB")
+        self._document(jours=-3)
+        creer_document(autre, Document.TypeDocument.ASSURANCE, jours=-9)
+
+        self.assertEqual(len(self._verifier()["ouvertes"]), 2)
+        self.assertEqual(Alerte.objects.filter(resolue_le__isnull=True).count(), 2)
+
+    # --- Résistance aux pannes d'envoi --------------------------------------
+
+    def test_une_panne_smtp_ne_perd_pas_l_alerte(self):
+        """La notification est une conséquence ; l'alerte est le travail."""
+        self._document(jours=-6)
+
+        with patch(
+            "fleet.services.send_mail", side_effect=OSError("serveur injoignable")
+        ):
+            bilan = self._verifier()
+
+        self.assertEqual(len(bilan["ouvertes"]), 1)
+        alerte = Alerte.objects.get()
+        self.assertTrue(alerte.est_ouverte)
+        self.assertIsNone(alerte.email_envoye_le)
+        self.assertEqual(len(mail.outbox), 0)
+
+    @override_settings(FLEETFLOW_EMAIL_GERANT="")
+    def test_sans_adresse_de_gerant_l_alerte_est_quand_meme_ouverte(self):
+        self._document(jours=-6)
+        with self.assertLogs("fleet.services", level="WARNING"):
+            self._verifier()
+        self.assertEqual(Alerte.objects.count(), 1)
+        self.assertIsNone(Alerte.objects.get().email_envoye_le)
+
+    # --- Coexistence avec les alertes de boîtier -----------------------------
+
+    def test_les_deux_familles_d_alertes_ne_se_genent_pas(self):
+        """Un camion peut avoir un boîtier muet ET une pièce dépassée."""
+        from decimal import Decimal
+
+        from fleet.models import FournisseurGPS, PositionGPS
+
+        self.vehicule.fournisseur_gps = FournisseurGPS.objects.create(nom="Cartrack")
+        self.vehicule.boitier_id = "CT-1"
+        self.vehicule.save(update_fields=["fournisseur_gps", "boitier_id"])
+        PositionGPS.objects.create(
+            vehicule=self.vehicule,
+            latitude=Decimal("6.370300"),
+            longitude=Decimal("2.391200"),
+            vitesse_kmh=Decimal("0"),
+            horodatage=self.maintenant - timedelta(hours=4),
+        )
+        self._document(jours=-3)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            services.verifier_signaux(maintenant=self.maintenant)
+            services.verifier_echeances(maintenant=self.maintenant)
+
+        self.assertEqual(
+            Alerte.objects.filter(resolue_le__isnull=True).count(), 2
+        )
+        self.assertEqual(
+            Alerte.objects.filter(
+                type_alerte=Alerte.TypeAlerte.SANS_SIGNAL, vehicule=self.vehicule
+            ).count(),
+            1,
+        )
+
+    # --- Requêtes ------------------------------------------------------------
+
+    def test_le_balayage_ne_grossit_pas_avec_la_flotte(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        self._document(jours=-3)
+        # Premier passage hors mesure : il ouvre l'alerte. Sans cette
+        # stabilisation, les deux mesures compareraient deux situations
+        # différentes.
+        self._verifier()
+
+        with CaptureQueriesContext(connection) as avec_un:
+            services.verifier_echeances(maintenant=self.maintenant)
+
+        for index in range(6):
+            autre = creer_vehicule(immatriculation=f"YY {5000 + index} RB")
+            creer_document(autre, Document.TypeDocument.ASSURANCE, jours=300)
+        with CaptureQueriesContext(connection) as avec_sept:
+            services.verifier_echeances(maintenant=self.maintenant)
+
+        self.assertEqual(len(avec_un), len(avec_sept))
+
+
+class CoutEntretiensTest(TestCase):
+    def test_somme_de_l_annee(self):
+        from decimal import Decimal
+
+        from fleet.models import Entretien
+
+        vehicule = creer_vehicule()
+        aujourdhui = timezone.localdate()
+        for montant, annee in (("85000", aujourdhui.year), ("620000", aujourdhui.year)):
+            Entretien.objects.create(
+                vehicule=vehicule,
+                type_entretien=Entretien.TypeEntretien.VIDANGE,
+                date=aujourdhui.replace(month=1, day=15),
+                km=1_000,
+                cout=Decimal(montant),
+                prestataire="Garage Akpakpa",
+            )
+        self.assertEqual(
+            services.cout_entretiens_annee(aujourdhui.year), Decimal("705000")
+        )
+
+    def test_une_annee_sans_entretien_vaut_zero(self):
+        from decimal import Decimal
+
+        # Zéro est ici une réponse juste : aucune intervention enregistrée
+        # signifie bien aucune dépense.
+        self.assertEqual(services.cout_entretiens_annee(1999), Decimal("0"))

@@ -159,3 +159,15 @@ class Command(BaseCommand):
             self.stdout.write(
                 f"  nouvel essai d'envoi pour {alerte.vehicule.immatriculation}."
             )
+
+        # Les echeances sont verifiees au meme point. Elles ne changent pas
+        # d'une seconde a l'autre, mais le balayage ne coute que trois
+        # requetes et cela evite une tache planifiee de plus. Le rapport
+        # quotidien les reverifie de son cote.
+        echeances = services.verifier_echeances(maintenant=maintenant)
+        for alerte in echeances["ouvertes"]:
+            self.stdout.write(self.style.WARNING(f"  ALERTE echeance : {alerte.message}"))
+        for alerte in echeances["resolues"]:
+            self.stdout.write(
+                self.style.SUCCESS(f"  echeance resolue : {alerte.message}")
+            )

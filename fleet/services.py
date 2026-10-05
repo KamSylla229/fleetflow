@@ -49,6 +49,7 @@ from django.db import models, transaction
 from django.db.models import OuterRef, Subquery
 from django.utils import timezone
 
+from .echeances import classer_echeances, collecter_echeances
 from .models import (
     Alerte,
     Chauffeur,
@@ -1484,3 +1485,158 @@ def verifier_signaux(maintenant=None):
         reessayees.append(alerte)
 
     return {"ouvertes": ouvertes, "resolues": resolues, "reessayees": reessayees}
+
+
+# --- Alertes d'échéance ------------------------------------------------------
+# Le classement vit dans fleet/echeances.py, qui ne connaît ni les alertes ni
+# les e-mails. Ce qui suit fait le pont : il transforme un classement en
+# alertes ouvertes, résolues, et en notifications.
+
+
+def _texte_alerte_echeance(item):
+    """Sujet et corps de l'e-mail d'une échéance.
+
+    Le message ne contient **aucun compte à rebours** : il donne la date, pas
+    un nombre de jours. Un « échéance dans 12 jours » écrit en base serait
+    faux le lendemain, et comme l'alerte n'est jamais recréée tant que le
+    problème dure, le texte vivrait des semaines après être devenu inexact.
+    """
+    if item.depassee:
+        etat = f"dépassée depuis le {item.date_echeance:%d/%m/%Y}"
+    else:
+        etat = f"à échéance le {item.date_echeance:%d/%m/%Y}"
+
+    sujet = f"[FleetFlow] {item.libelle} : {etat}"
+    corps = (
+        f"{item.libelle}\n\n"
+        f"Pièce {etat}.\n\n"
+        "Cette alerte reste ouverte jusqu'au renouvellement. Elle se résoudra "
+        "d'elle-même dès que la nouvelle date sera enregistrée.\n\n"
+        "-- \nFleetFlow"
+    )
+    return sujet, corps
+
+
+@transaction.atomic
+def ouvrir_alerte_echeance(item, maintenant=None):
+    """Ouvre l'alerte d'une échéance et prévient le gérant.
+
+    `item` est un EcheanceClassee. Le type d'alerte et la clé étrangère
+    renseignée dépendent de sa nature : un document pour une pièce de camion,
+    un chauffeur pour un permis. Ce sont ces deux clés que les contraintes
+    d'unicité partielles surveillent.
+    """
+    maintenant = maintenant or timezone.now()
+
+    if item.chauffeur is not None:
+        type_alerte = Alerte.TypeAlerte.ECHEANCE_PERMIS
+        champs = {"chauffeur": item.chauffeur}
+    else:
+        type_alerte = Alerte.TypeAlerte.ECHEANCE
+        champs = {"document": item.document, "vehicule": None}
+
+    alerte = Alerte.objects.create(
+        type_alerte=type_alerte,
+        message=f"{item.libelle} : {item.detail}.",
+        ouverte_le=maintenant,
+        **champs,
+    )
+
+    sujet, corps = _texte_alerte_echeance(item)
+    _programmer_notification(alerte, sujet, corps)
+    return alerte
+
+
+def verifier_echeances(maintenant=None):
+    """Ouvre, résout et notifie les alertes d'échéance datée.
+
+    Une alerte est ouverte dès qu'une pièce passe sous trente jours **ou** est
+    dépassée, et une seule : si elle est déjà ouverte, on ne touche à rien.
+
+    C'est le point le plus important de cette fonction. Une pièce qui passe de
+    « sous 30 jours » à « dépassée » garde la **même** alerte. La tentation
+    serait de résoudre l'ancienne et d'en créer une nouvelle, pour que le
+    message reflète le nouvel état — mais cela renverrait un e-mail au gérant
+    pour un problème qu'il connaît déjà, et lui ferait perdre la date
+    d'ouverture, donc l'ancienneté du retard.
+
+    Résolution, et c'est l'autre piège : une alerte porte sur un **document
+    précis**. Quand une assurance est renouvelée, la nouvelle pièce devient
+    celle en vigueur et l'ancienne disparaît de la collecte. Sans traitement
+    explicite, l'alerte de l'ancien document resterait ouverte pour toujours —
+    exactement la même famille de bug que la pagination qui ne plantait qu'au
+    delà d'une page : un cas que le chemin courant ne traverse jamais. On
+    résout donc toute alerte ouverte dont l'objet n'est plus dans la liste à
+    signaler, qu'il ait été renouvelé, repoussé au-delà de trente jours, ou
+    sorti de la flotte.
+
+    Pas de reprise d'envoi ici, contrairement à verifier_signaux : le rapport
+    quotidien reprend de toute façon toutes les échéances, et une panne SMTP
+    d'une minute n'a pas à être rattrapée alerte par alerte.
+    """
+    maintenant = maintenant or timezone.now()
+    # localdate() convertit un datetime aware en date du fuseau du projet :
+    # comparer des échéances en UTC décalerait d'un jour près de minuit.
+    today = timezone.localdate(maintenant)
+
+    classement = classer_echeances(collecter_echeances(), today=today)
+    a_signaler = classement["depassees"] + classement["sous_30_j"]
+
+    documents_concernes = {
+        item.document.pk for item in a_signaler if item.document is not None
+    }
+    chauffeurs_concernes = {
+        item.chauffeur.pk for item in a_signaler if item.chauffeur is not None
+    }
+
+    # Une requête pour toutes les alertes d'échéance ouvertes, indexées par
+    # objet : le balayage n'interroge plus la base ensuite.
+    ouvertes_par_document = {}
+    ouvertes_par_chauffeur = {}
+    for alerte in Alerte.objects.filter(
+        type_alerte__in=[
+            Alerte.TypeAlerte.ECHEANCE,
+            Alerte.TypeAlerte.ECHEANCE_PERMIS,
+        ],
+        resolue_le__isnull=True,
+    ):
+        if alerte.document_id is not None:
+            ouvertes_par_document[alerte.document_id] = alerte
+        elif alerte.chauffeur_id is not None:
+            ouvertes_par_chauffeur[alerte.chauffeur_id] = alerte
+
+    nouvelles = []
+    for item in a_signaler:
+        if item.document is not None:
+            if item.document.pk in ouvertes_par_document:
+                continue
+        elif item.chauffeur is not None:
+            if item.chauffeur.pk in ouvertes_par_chauffeur:
+                continue
+        else:
+            continue
+        nouvelles.append(ouvrir_alerte_echeance(item, maintenant))
+
+    resolues = []
+    for document_id, alerte in ouvertes_par_document.items():
+        if document_id not in documents_concernes:
+            resolues.append(resoudre_alerte(alerte, maintenant))
+    for chauffeur_id, alerte in ouvertes_par_chauffeur.items():
+        if chauffeur_id not in chauffeurs_concernes:
+            resolues.append(resoudre_alerte(alerte, maintenant))
+
+    return {"ouvertes": nouvelles, "resolues": resolues}
+
+
+def cout_entretiens_annee(annee=None):
+    """Somme des coûts d'entretien d'une année civile.
+
+    Renvoie un Decimal, zéro s'il n'y a aucune intervention — ici, zéro est
+    une réponse juste et non une absence d'information : aucun entretien
+    enregistré signifie bien aucune dépense.
+    """
+    annee = annee or timezone.localdate().year
+    total = Entretien.objects.filter(date__year=annee).aggregate(
+        total=models.Sum("cout")
+    )["total"]
+    return total or Decimal("0")
